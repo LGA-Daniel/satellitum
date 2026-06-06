@@ -20,7 +20,7 @@ services:
     container_name: satellitum_core
     restart: always
     ports:
-      - "8501:8501"
+      - "8502:8502"
     volumes:
       - .:/app  
       - ~/.config/earthengine:/root/.config/earthengine
