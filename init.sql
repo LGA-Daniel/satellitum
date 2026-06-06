@@ -1,0 +1,7 @@
+CREATE TABLE IF NOT EXISTS historico_execucoes (
+    id SERIAL PRIMARY KEY,
+    nome_arquivo VARCHAR(255) NOT NULL,
+    script VARCHAR(255) NOT NULL,
+    status VARCHAR(50) NOT NULL,
+    data_execucao TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);

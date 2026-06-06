@@ -1,0 +1,44 @@
+services:
+  satellitum_db:
+    image: postgres:16-alpine
+    container_name: satellitum_db
+    restart: always
+    environment:
+      POSTGRES_USER: administrador
+      POSTGRES_PASSWORD: 202606
+      POSTGRES_DB: satellitum
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - satellitum_network
+
+  satellitum_core:
+    build: .
+    container_name: satellitum_core
+    restart: always
+    ports:
+      - "8501:8501"
+    volumes:
+      - .:/app  
+      - ~/.config/earthengine:/root/.config/earthengine
+      - /storage/datasets:/data/datasets
+    environment:
+      - DB_HOST=satellitum_db
+      - DB_NAME=satellitum
+      - DB_USER=administrador
+      - DB_PASS=202606
+    depends_on:
+      - satellitum_db
+    networks:
+      - satellitum_network
+
+networks:
+  satellitum_network:
+    driver: bridge
+
+volumes:
+  pg_data:
+    driver: local
