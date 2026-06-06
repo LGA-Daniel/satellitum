@@ -8,7 +8,7 @@ services:
       POSTGRES_PASSWORD: 202606
       POSTGRES_DB: satellitum
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -20,7 +20,7 @@ services:
     container_name: satellitum_core
     restart: always
     ports:
-      - "8502:8502"
+      - "8502:8501"
     volumes:
       - .:/app  
       - ~/.config/earthengine:/root/.config/earthengine
@@ -30,6 +30,7 @@ services:
       - DB_NAME=satellitum
       - DB_USER=administrador
       - DB_PASS=202606
+      - EARTHENGINE_PROJECT=ppgrhs
     depends_on:
       - satellitum_db
     networks:

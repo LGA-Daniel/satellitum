@@ -13,7 +13,9 @@ Antes de operar com o GEE é necessário obter um token de autenticação:
 1. Instalação da API
 Certifique-se de que a biblioteca Python do Earth Engine está instalada no seu ambiente:
 
-pip install earthengine-api
+sudo apt install pipx
+pipx ensurepath
+pipx install earthengine-api
 
 2. Gerando as Credenciais (Terminal)
 
