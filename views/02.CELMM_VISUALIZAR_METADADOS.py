@@ -5,7 +5,7 @@ from modules.core import obter_metadados_salvos
 
 st.set_page_config(page_title="CELMM | Visualizar Metadados", page_icon="📊", layout="wide")
 
-st.title("CELMM - Visualização de Metadados")
+st.title("CELMM - Visualizar Metadados")
 st.divider()
 
 # Busca os dados no banco
@@ -28,7 +28,7 @@ else:
     df = df.sort_values(by='data', ascending=False)
 
     # 1. Filtros no Expander no topo da página
-    with st.expander("Filtros", expanded=False):
+    with st.expander("Filtros", expanded=True):
         col_f1, col_f2 = st.columns(2)
         
         with col_f1:
@@ -107,8 +107,6 @@ else:
     ]
 
     # 2. Seção de Indicadores Gerais
-    col1, col2, col3 = st.columns(3)
-    
     if not df_filtrado.empty:
         total_imagens = len(df_filtrado)
         
@@ -121,78 +119,70 @@ else:
         
         # Junta todas as datas formatadas separadas por vírgula
         data_max_pixels = ", ".join([d.strftime('%d/%m/%Y') for d in datas_max])
+        
+        # Contagem de zeros
+        contagem_zeros = int((df_filtrado['pixels_validos'] == 0).sum())
+        
+        # Cálculo de aproveitamento baseando-se no maior valor do período
+        if max_pixels > 0:
+            aproveitamento = df_filtrado['pixels_validos'] / max_pixels
+            contagem_50 = int((aproveitamento >= 0.50).sum())
+            contagem_75 = int((aproveitamento >= 0.75).sum())
+        else:
+            contagem_50 = 0
+            contagem_75 = 0
     else:
         total_imagens = 0
         max_pixels = 0
         data_max_pixels = "N/A"
+        contagem_zeros = 0
+        contagem_50 = 0
+        contagem_75 = 0
+
+    st.subheader("Estatística Básica")
+    st.text("")
+    col1, col2, col3 = st.columns(3)
+    
+    def card_destacado(label, value, title_tooltip=None):
+        tooltip_attr = f'title="{title_tooltip}"' if title_tooltip else ""
+        return f"""
+            <div style="
+                background-color: rgba(2, 132, 199, 0.08); 
+                border: 1px solid rgba(2, 132, 199, 0.25); 
+                border-radius: 8px; 
+                padding: 12px 15px; 
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                text-align: center;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+                margin-bottom: 15px;
+                width: 100%;
+            " {tooltip_attr}>
+                <p style="margin: 0; font-size: 0.85em; font-weight: 500; color: var(--text-color); opacity: 0.8; text-align: center; width: 100%;">{label}</p>
+                <div style="margin: 4px 0 0 0; font-size: 1.6em; color: var(--primary-color); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; width: 100%;">{value}</div>
+            </div>
+        """
 
     with col1:
-        st.metric(label="Total de Imagens", value=total_imagens)
+        st.markdown(card_destacado("Total de Imagens", str(total_imagens)), unsafe_allow_html=True)
+        st.markdown(card_destacado("Imagens Nulas", str(contagem_zeros)), unsafe_allow_html=True)
     with col2:
-        st.metric(label="Máximo de Pixels Válidos", value=f"{max_pixels:,}")
+        st.markdown(card_destacado("Máximo Pixels", f"{max_pixels:,}"), unsafe_allow_html=True)
+        st.markdown(card_destacado("Imagens com Aproveitamento ≥ 50%", str(contagem_50)), unsafe_allow_html=True)
     with col3:
-        st.metric(label="Data do Máximo", value=data_max_pixels)
+        st.markdown(card_destacado("Melhor Imagem", data_max_pixels, title_tooltip=data_max_pixels), unsafe_allow_html=True)
+        st.markdown(card_destacado("Imagens com Aproveitamento ≥ 75%", str(contagem_75)), unsafe_allow_html=True)
 
     st.divider()
 
+    st.subheader("Metadados Salvos")
+    st.text("")
     if df_filtrado.empty:
         st.warning("Nenhum dado encontrado para os filtros selecionados.")
     else:
-        # 3. Gráfico de Evolução Temporal
-        try:
-            # Agrupa por data obtendo o valor máximo de pixels válidos por dia
-            df_grafico = df_filtrado.groupby('data')['pixels_validos'].max().sort_index()
-            st.line_chart(df_grafico)
-        except Exception as e:
-            st.warning(f"Não foi possível gerar o gráfico temporal: {e}")
-
-        st.divider()
-
-        # 4. Histograma de Pixels Válidos
-        st.subheader("Distribuição do Número de Imagens por Pixels Válidos")
-        try:
-            if len(df_filtrado) > 1 and df_filtrado['pixels_validos'].nunique() > 1:
-                min_val = int(df_filtrado['pixels_validos'].min())
-                max_val = int(df_filtrado['pixels_validos'].max())
-                
-                # Define os limites das 10 classes antes de gerar o histograma
-                bin_edges = [min_val + i * (max_val - min_val) / 10 for i in range(11)]
-                bin_edges = [int(edge) for edge in bin_edges]
-                bin_edges = sorted(list(set(bin_edges))) # Remove duplicatas em intervalos estreitos
-                
-                if len(bin_edges) > 1:
-                    # Agrupa os dados nas classes pré-definidas
-                    binned_data = pd.cut(df_filtrado['pixels_validos'], bins=bin_edges, include_lowest=True).value_counts().sort_index()
-                    
-                    # Cria rótulos ordenados no eixo X (adicionando prefixo numérico para garantir a ordenação correta)
-                    labels_hist = []
-                    for i, idx in enumerate(binned_data.index):
-                        left = int(idx.left)
-                        right = int(idx.right)
-                        labels_hist.append(f"{i+1:02d}) {left:,} a {right:,}")
-                    
-                    df_hist = pd.DataFrame({
-                        "Número de Imagens": binned_data.values
-                    }, index=labels_hist)
-                    
-                    st.bar_chart(df_hist)
-                else:
-                    st.info("Intervalo de pixels válidos muito estreito para criar classes.")
-            else:
-                # Fallback simples caso não haja variação nos valores
-                valores_unicos = df_filtrado['pixels_validos'].value_counts()
-                df_hist = pd.DataFrame({
-                    "Número de Imagens": valores_unicos.values
-                }, index=[f"{int(v):,} pixels" for v in valores_unicos.index])
-                
-                st.bar_chart(df_hist)
-        except Exception as e:
-            st.warning(f"Não foi possível gerar o histograma: {e}")
-
-        st.divider()
-
-        # 5. Tabela de Dados e Exportação
-        
+       
         # Renomeia as colunas para exibição amigável
         df_exibicao = df_filtrado[[
             'id', 'data', 'satelite', 'z_grade_mgrs', 'tamanho_pixel', 'pixels_validos', 'data_registro'
@@ -208,13 +198,3 @@ else:
         
         # Exibe a tabela interativa
         st.dataframe(df_exibicao, use_container_width=True)
-
-        # Botão de exportação para CSV
-        csv = df_filtrado.to_csv(index=False).encode('utf-8')
-        st.download_button(
-            label="📥 Baixar Dados Filtrados (CSV)",
-            data=csv,
-            file_name=f"metadados_satellitum_{datetime.date.today()}.csv",
-            mime="text/csv",
-            type="secondary"
-        )

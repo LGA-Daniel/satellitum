@@ -4,21 +4,15 @@ import datetime
 import pandas as pd
 from modules.core import init_gee, salvar_metadados
 
-st.set_page_config(page_title="CELMM | Metadados", page_icon="🛰️", layout="wide")
+st.set_page_config(page_title="CELMM | Processar Metadados", page_icon="🛰️", layout="wide")
 
-st.title("CELMM - Análise de Metadados")
+st.title("CELMM - Processar Metadados")
 
 st.divider()
 
-# 1. Inicialização do Earth Engine
 if not init_gee():
     st.stop()
 
-# 2. Configuração da Interface no Streamlit
-
-st.markdown("Selecione o período desejado para verificar a disponibilidade de imagens.")
-
-# Layout em colunas para os inputs de data e pixel
 col1, col2 = st.columns(2)
 with col1:
     periodo = st.date_input(
@@ -92,16 +86,9 @@ if 'dados_tabela' not in st.session_state:
 if 'tamanho_pixel_salvo' not in st.session_state:
     st.session_state['tamanho_pixel_salvo'] = None
 
-col_run, col_reset, _ = st.columns([2, 4, 4])
+col_run, _ = st.columns([2, 8])
 with col_run:
     btn_processar = st.button("Processar Metadados", type="primary", use_container_width=True)
-with col_reset:
-    btn_resetar = st.button("Reiniciar Processamento", type="secondary", use_container_width=True)
-
-if btn_resetar:
-    st.session_state['dados_tabela'] = None
-    st.session_state['tamanho_pixel_salvo'] = None
-    st.rerun()
 
 if btn_processar:
     st.session_state['dados_tabela'] = None
@@ -175,8 +162,7 @@ if st.session_state['dados_tabela'] is not None:
     st.success(f"Processamento concluído! {len(df_resultados)} imagens analisadas.")
     st.dataframe(df_resultados, use_container_width=True)
 
-    st.subheader("Ações do Banco de Dados")
-    col_save, _ = st.columns([1, 3])
+    col_save, coluna_reset, _ = st.columns([2,2,6])
     with col_save:
         if st.button("Salvar no Banco de Dados", type="primary"):
             with st.spinner("Salvando registros no PostgreSQL..."):
@@ -186,3 +172,11 @@ if st.session_state['dados_tabela'] is not None:
                 )
                 if sucesso:
                     st.success("Dados salvos/atualizados com sucesso no banco de dados!")
+
+    with coluna_reset:
+        btn_resetar = st.button("Reiniciar Processamento", type="secondary", use_container_width=True)
+
+    if btn_resetar:
+        st.session_state['dados_tabela'] = None
+        st.session_state['tamanho_pixel_salvo'] = None
+        st.rerun()
