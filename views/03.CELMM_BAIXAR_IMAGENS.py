@@ -314,8 +314,8 @@ else:
                     )
                     
                     # Submissão da tarefa
-                    task_desc = f"Exportar_CSV_{date_str}"
-                    file_prefix = f"CELMM_Data_{date_str}"
+                    task_desc = f"Exportar_CSV_{date_str}_{pixel_sz}m"
+                    file_prefix = f"CELMM_Data_{date_str}_{pixel_sz}m"
                     
                     task = ee.batch.Export.table.toDrive(
                         collection=extracted_points,

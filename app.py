@@ -6,6 +6,7 @@ paginas = st.navigation([
     st.Page("views/01.CELMM_PROCESSAR_METADADOS.py", title="CELMM - Processar Metadados"),
     st.Page("views/02.CELMM_VISUALIZAR_METADADOS.py", title="CELMM - Visualizar Metadados"),
     st.Page("views/03.CELMM_BAIXAR_IMAGENS.py", title="CELMM - Baixar Imagens"),
+    st.Page("views/04.CELMM_ARQUIVOS_DRIVE.py", title="CELMM - Arquivos no Google Drive"),
     st.Page("views/99.Manutencao.py", title="Configurações do Sistema"),
 
 ])

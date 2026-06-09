@@ -6,7 +6,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from modules.models import Base
 from modules.core import engine
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 
 def run():
     print("=========================================")
@@ -25,12 +25,38 @@ def run():
     # 2. Criar tabelas declaradas que ainda não existirem
     print("\n[*] Sincronizando e criando tabelas declaradas no SQLAlchemy...")
     try:
-        # Cria todas as tabelas (historico_execucoes, metadados_imagens, etc.) se não existirem
+        # Cria todas as tabelas se não existirem
         Base.metadata.create_all(bind=engine)
         print("[+] Sincronização executada com sucesso.")
     except Exception as e:
         print(f"[!] Erro ao sincronizar/criar tabelas: {e}")
         return
+
+    # 2.1. Verificar se existem colunas ausentes na tabela celmm_pixels (migração incremental)
+    if "celmm_pixels" in tabelas_iniciais:
+        print("\n[*] Verificando integridade das colunas na tabela 'celmm_pixels'...")
+        try:
+            inspector = inspect(engine)
+            colunas_existentes = {c['name'] for c in inspector.get_columns("celmm_pixels")}
+            
+            colunas_esperadas = {
+                "data": "VARCHAR(50)",
+                "satelite": "VARCHAR(100)",
+                "z_grade_mgrs": "VARCHAR(50)",
+                "tamanho_pixel": "INTEGER",
+                "zenital": "DOUBLE PRECISION"
+            }
+            
+            with engine.connect() as conn:
+                for col_name, col_type in colunas_esperadas.items():
+                    if col_name not in colunas_existentes:
+                        print(f"[+] Adicionando coluna ausente: '{col_name}' ({col_type}) em 'celmm_pixels'")
+                        conn.execute(text(f"ALTER TABLE celmm_pixels ADD COLUMN {col_name} {col_type};"))
+                conn.commit()
+            print("[+] Verificação/Atualização de colunas concluída com sucesso.")
+        except Exception as e:
+            print(f"[!] Erro ao atualizar colunas ausentes: {e}")
+            return
 
     # 3. Listar tabelas após sincronização para validar
     try:
