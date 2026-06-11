@@ -18,11 +18,12 @@ def reiniciar_pagina_callback():
     st.session_state['filtro_aplicado'] = False
     st.session_state['logs_execucao'] = ""
 
-st.set_page_config(page_title="CELMM | Baixar Imagens", page_icon="📥", layout="wide")
+st.set_page_config(page_title="CELMM | Processar Produtos", page_icon="🛰️", layout="wide")
 
-st.title("CELMM - Baixar Imagens")
+st.title("CELMM - Processar Produtos")
+st.caption("Processamento de produtos no GEE. | Produtos em CSV armazenados no Google Drive.")
 st.divider()
-
+st.text("")
 # Inicialização do Earth Engine
 if not init_gee():
     st.stop()
@@ -161,7 +162,6 @@ else:
         df_filtrado = df_filtrado.copy()
         df_filtrado['aproveitamento'] = 0.0
 
-    st.subheader("Resultados Filtrados")
     st.text("")
 
     if df_filtrado.empty:
@@ -178,7 +178,7 @@ else:
         df_to_edit = df_display[[
             'Selecionar', 'data', 'satelite', 'pixels_validos'
         ]].rename(columns={
-            'data': 'Data da Imagem',
+            'data': 'Data do Produto',
             'satelite': 'Satélite',
             'pixels_validos': 'Pixels Válidos'
         })
@@ -190,7 +190,7 @@ else:
             column_config={
                 "Selecionar": st.column_config.CheckboxColumn(
                     "Selecionar",
-                    help="Selecione as imagens para download no CSV",
+                    help="Selecione os produtos para download no CSV",
                     default=selecionar_padrao,
                 )
             },
@@ -203,15 +203,6 @@ else:
         # Seleciona os registros marcados
         selected_rows = edited_df[edited_df["Selecionar"] == True]
         
-        col_btn, _ = st.columns([4, 8])
-        with col_btn:
-            btn_processar = st.button(
-                f"Iniciar Processamento no GEE ({len(selected_rows)} imagens)", 
-                type="primary", 
-                use_container_width=True,
-                disabled=selected_rows.empty
-            )
-
         # Lógicas de processamento auxiliares do Earth Engine
         def preprocess_1(image):
             scl = image.select('SCL')
@@ -234,158 +225,184 @@ else:
                 final_image = select_image.clip(ROI)
             return final_image
 
-        if btn_processar and not selected_rows.empty:
-            st.session_state['logs_execucao'] = ""
-            log_placeholder = st.empty()
-            
-            def append_log(message):
-                timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                st.session_state['logs_execucao'] += f"[{timestamp}] {message}\n"
-                log_placeholder.code(st.session_state['logs_execucao'])
+        def processar_gee_conteudo(selected_rows_data, df_filtrado_data):
+            if st.session_state.get("executar_processamento_gee") and not st.session_state.get("processamento_gee_concluido"):
+                st.write(f"Processando {len(selected_rows_data)} produtos no Google Earth Engine...")
+                progresso_geral = st.progress(0.0, text="Iniciando...")
+                log_placeholder = st.empty()
+                
+                st.session_state['logs_execucao'] = ""
+                
+                def append_log(message):
+                    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    st.session_state['logs_execucao'] += f"[{timestamp}] {message}\n"
+                    log_placeholder.code(st.session_state['logs_execucao'])
 
-            append_log(f"Iniciando fila de processamento para {len(selected_rows)} imagens...")
-            
-            try:
-                ROI = ee.FeatureCollection("projects/ppgrhs/assets/CELMM_2025_AJUSTADO")
-            except Exception as e:
-                append_log(f"[ERRO] Falha ao carregar a ROI CELMM no GEE: {e}")
-                st.stop()
-                
-            success_count = 0
-            fail_count = 0
-            
-            for index, rdata in enumerate(selected_rows.to_dict('records')):
-                # Encontra o registro correspondente no df_filtrado para obter z_grade_mgrs e tamanho_pixel
-                match = df_filtrado[
-                    (df_filtrado['data'] == rdata['Data da Imagem']) &
-                    (df_filtrado['satelite'] == rdata['Satélite'])
-                ]
-                
-                if match.empty:
-                    append_log(f"[ERRO] [{index + 1}/{len(selected_rows)}] Não foi possível recuperar os metadados da imagem de {rdata['Data da Imagem']}.")
-                    fail_count += 1
-                    continue
-                    
-                row_data = match.iloc[0]
-                date_obj = row_data['data']
-                date_str = date_obj.strftime('%Y-%m-%d')
-                sat = row_data['satelite']
-                grade = row_data['z_grade_mgrs']
-                pixel_sz = int(row_data['tamanho_pixel'])
-                
-                append_log(f"[{index + 1}/{len(selected_rows)}] Processando data: {date_str} | Satélite: {sat} | Grade: {grade} | Pixel: {pixel_sz}m")
+                append_log(f"Iniciando fila de processamento para {len(selected_rows_data)} produtos...")
                 
                 try:
-                    str_start = date_str
-                    str_end = (date_obj + datetime.timedelta(days=1)).strftime('%Y-%m-%d')
+                    ROI = ee.FeatureCollection("projects/ppgrhs/assets/CELMM_2025_AJUSTADO")
+                except Exception as e:
+                    append_log(f"[ERRO] Falha ao carregar a ROI CELMM no GEE: {e}")
+                    st.session_state["processamento_gee_concluido"] = True
+                    st.session_state["executar_processamento_gee"] = False
+                    st.rerun()
                     
-                    # Filtra a coleção no GEE
-                    collection = (ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
-                                  .filterBounds(ROI)
-                                  .filterDate(str_start, str_end)
-                                  .filter(ee.Filter.eq('MGRS_TILE', grade))
-                                  .filter(ee.Filter.eq('SPACECRAFT_NAME', sat)))
+                success_count = 0
+                fail_count = 0
+                total = len(selected_rows_data)
+                
+                for index, rdata in enumerate(selected_rows_data.to_dict('records')):
+                    pct = index / total
+                    progresso_geral.progress(pct, text=f"Progresso Geral: {index}/{total} produtos ({int(pct*100)}%)")
                     
-                    # Verifica se a imagem existe
-                    size = collection.size().getInfo()
-                    if size == 0:
-                        append_log(f"[ERRO] [{index + 1}/{len(selected_rows)}] Nenhuma imagem correspondente encontrada no Earth Engine.")
+                    match = df_filtrado_data[
+                        (df_filtrado_data['data'] == rdata['Data do Produto']) &
+                        (df_filtrado_data['satelite'] == rdata['Satélite'])
+                    ]
+                    
+                    if match.empty:
+                        append_log(f"[ERRO] [{index + 1}/{total}] Não foi possível recuperar os metadados do produto de {rdata['Data do Produto']}.")
                         fail_count += 1
                         continue
                         
-                    image = collection.first()
-                    CRS_base = image.select('B4').projection()
+                    row_data = match.iloc[0]
+                    date_obj = row_data['data']
+                    date_str = date_obj.strftime('%Y-%m-%d')
+                    sat = row_data['satelite']
+                    grade = row_data['z_grade_mgrs']
+                    pixel_sz = int(row_data['tamanho_pixel'])
                     
-                    # Processamento
-                    img_with_SCL = preprocess_1(image)
-                    bands = ['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B8A', 'B9', 'B11', 'B12']
-                    final_img = preprocess_2(img_with_SCL, bands, CRS_base, pixel_sz, ROI)
+                    append_log(f"[{index + 1}/{total}] Processando data: {date_str} | Satélite: {sat} | Grade: {grade} | Pixel: {pixel_sz}m")
                     
-                    # Amostragem
-                    image_for_extraction = final_img.addBands(ee.Image.pixelLonLat())
-                    final_CRS = CRS_base.atScale(pixel_sz) if pixel_sz > 10 else CRS_base
-                    
-                    extracted_points = image_for_extraction.sample(
-                        region=ROI,
-                        scale=pixel_sz,
-                        projection=final_CRS,
-                        geometries=False,
-                        tileScale=4
-                    )
-                    
-                    # Submissão da tarefa
-                    task_desc = f"Exportar_CSV_{date_str}_{pixel_sz}m"
-                    file_prefix = f"CELMM_Data_{date_str}_{pixel_sz}m"
-                    
-                    task = ee.batch.Export.table.toDrive(
-                        collection=extracted_points,
-                        description=task_desc,
-                        folder='CSV_Sentinel2',
-                        fileNamePrefix=file_prefix,
-                        fileFormat='CSV'
-                    )
-                    
-                    append_log(f"[{index + 1}/{len(selected_rows)}] Submetendo tarefa ao GEE...")
-                    task.start()
-                    task_id = task.status().get('id')
-                    append_log(f"[{index + 1}/{len(selected_rows)}] Tarefa iniciada no GEE. ID: {task_id}")
-                    
-                    # Polling loop
-                    start_time = time.time()
-                    last_state = None
-                    
-                    while True:
-                        status = task.status()
-                        state = status.get('state')
-                        elapsed = int(time.time() - start_time)
+                    try:
+                        str_start = date_str
+                        str_end = (date_obj + datetime.timedelta(days=1)).strftime('%Y-%m-%d')
                         
-                        if state != last_state:
-                            append_log(f"[{index + 1}/{len(selected_rows)}] Status: {state} ({elapsed}s decorridos)")
-                            last_state = state
-                            
-                        if state in ['COMPLETED', 'FAILED', 'CANCELLED']:
-                            if state == 'COMPLETED':
-                                append_log(f"[{index + 1}/{len(selected_rows)}] Sucesso! Exportação concluída em {elapsed}s.")
-                                success_count += 1
-                            else:
-                                err_msg = status.get('error_message', 'Sem detalhes de erro.')
-                                append_log(f"[ERRO] [{index + 1}/{len(selected_rows)}] Tarefa falhou/cancelou. Erro: {err_msg}")
-                                fail_count += 1
-                            break
-                            
-                        time.sleep(5)
+                        collection = (ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+                                      .filterBounds(ROI)
+                                      .filterDate(str_start, str_end)
+                                      .filter(ee.Filter.eq('MGRS_TILE', grade))
+                                      .filter(ee.Filter.eq('SPACECRAFT_NAME', sat)))
                         
-                except Exception as e:
-                    append_log(f"[ERRO] [{index + 1}/{len(selected_rows)}] Erro durante processamento: {e}")
-                    fail_count += 1
-                    
-            append_log("--------------------------------------------------")
-            append_log(f"Processamento concluído! Sucesso: {success_count} | Falhas: {fail_count}")
+                        size = collection.size().getInfo()
+                        if size == 0:
+                            append_log(f"[ERRO] [{index + 1}/{total}] Nenhum produto correspondente encontrado no Earth Engine.")
+                            fail_count += 1
+                            continue
+                            
+                        image = collection.first()
+                        CRS_base = image.select('B4').projection()
+                        
+                        img_with_SCL = preprocess_1(image)
+                        bands = ['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B8A', 'B9', 'B11', 'B12']
+                        final_img = preprocess_2(img_with_SCL, bands, CRS_base, pixel_sz, ROI)
+                        
+                        image_for_extraction = final_img.addBands(ee.Image.pixelLonLat())
+                        final_CRS = CRS_base.atScale(pixel_sz) if pixel_sz > 10 else CRS_base
+                        
+                        extracted_points = image_for_extraction.sample(
+                            region=ROI,
+                            scale=pixel_sz,
+                            projection=final_CRS,
+                            geometries=False,
+                            tileScale=4
+                        )
+                        
+                        task_desc = f"Exportar_CSV_{date_str}_{pixel_sz}m"
+                        file_prefix = f"CELMM_Data_{date_str}_{pixel_sz}m"
+                        
+                        task = ee.batch.Export.table.toDrive(
+                            collection=extracted_points,
+                            description=task_desc,
+                            folder='CSV_Sentinel2',
+                            fileNamePrefix=file_prefix,
+                            fileFormat='CSV'
+                        )
+                        
+                        append_log(f"[{index + 1}/{total}] Submetendo tarefa ao GEE...")
+                        task.start()
+                        task_id = task.status().get('id')
+                        append_log(f"[{index + 1}/{total}] Tarefa iniciada no GEE. ID: {task_id}")
+                        
+                        start_time = time.time()
+                        last_state = None
+                        
+                        while True:
+                            status = task.status()
+                            state = status.get('state')
+                            elapsed = int(time.time() - start_time)
+                            
+                            if state != last_state:
+                                append_log(f"[{index + 1}/{total}] Status: {state} ({elapsed}s decorridos)")
+                                last_state = state
+                                
+                            if state in ['COMPLETED', 'FAILED', 'CANCELLED']:
+                                if state == 'COMPLETED':
+                                    append_log(f"[{index + 1}/{total}] Sucesso! Exportação concluída em {elapsed}s.")
+                                    success_count += 1
+                                else:
+                                    err_msg = status.get('error_message', 'Sem detalhes de erro.')
+                                    append_log(f"[ERRO] [{index + 1}/{total}] Tarefa falhou/cancelou. Erro: {err_msg}")
+                                    fail_count += 1
+                                break
+                                
+                            time.sleep(5)
+                            
+                    except Exception as e:
+                        append_log(f"[ERRO] [{index + 1}/{total}] Erro durante processamento: {e}")
+                        fail_count += 1
+                        
+                append_log("--------------------------------------------------")
+                append_log(f"Processamento concluído! Sucesso: {success_count} | Falhas: {fail_count}")
+                st.session_state["processamento_gee_concluido"] = True
+                st.session_state["executar_processamento_gee"] = False
+                st.rerun()
+
+            if st.session_state.get("processamento_gee_concluido"):
+                st.subheader("Processamento Concluído! 📋")
+                st.progress(1.0, text="Todos os produtos processados (100%)")
+                st.subheader("Logs de Execução")
+                st.code(st.session_state.get('logs_execucao', ""))
+                
+                col_l1, col_l2 = st.columns(2)
+                with col_l1:
+                    st.download_button(
+                        label="Baixar Logs (.txt)",
+                        data=st.session_state.get('logs_execucao', ""),
+                        file_name=f"log_processamento_{datetime.date.today()}.txt",
+                        mime="text/plain",
+                        use_container_width=True
+                    )
+                with col_l2:
+                    if st.button("Fechar", type="primary", use_container_width=True):
+                        st.session_state["processamento_gee_concluido"] = False
+                        st.session_state["executar_processamento_gee"] = False
+                        st.rerun()
+
+        if hasattr(st, "dialog"):
+            processar_gee_modal = st.dialog("Processando no GEE ⚙️")(processar_gee_conteudo)
+        else:
+            def processar_gee_modal(selected_rows_data, df_filtrado_data):
+                with st.expander("Processando no GEE ⚙️", expanded=True):
+                    processar_gee_conteudo(selected_rows_data, df_filtrado_data)
+
+        col_spacer, col_reset, col_process = st.columns([6, 3, 3])
+        with col_reset:
+            st.button("Reiniciar Página", type="secondary", use_container_width=True, on_click=reiniciar_pagina_callback)
+        with col_process:
+            btn_processar = st.button(
+                f"Iniciar Processamento ({len(selected_rows)})", 
+                type="primary", 
+                use_container_width=True,
+                disabled=selected_rows.empty
+            )
+
+        if btn_processar and not selected_rows.empty:
+            st.session_state["executar_processamento_gee"] = True
+            st.session_state["processamento_gee_concluido"] = False
+            st.session_state["logs_execucao"] = ""
             st.rerun()
 
-        # Exibição estática dos logs salvos no session_state
-        if st.session_state['logs_execucao']:
-            st.divider()
-            st.subheader("Logs de Execução")
-            st.code(st.session_state['logs_execucao'])
-            
-            col_l1, col_l2, col_l3 = st.columns(3)
-            with col_l1:
-                st.download_button(
-                    label="Baixar Logs de Processamento (.txt)",
-                    data=st.session_state['logs_execucao'],
-                    file_name=f"log_processamento_{datetime.date.today()}.txt",
-                    mime="text/plain",
-                    use_container_width=True
-                )
-            with col_l2:
-                if st.button("Limpar Logs", use_container_width=True):
-                    st.session_state['logs_execucao'] = ""
-                    st.rerun()
-            with col_l3:
-                st.button("Reiniciar Página", type="secondary", use_container_width=True, on_click=reiniciar_pagina_callback)
-        else:
-            st.divider()
-            col_reset, _ = st.columns([4, 8])
-            with col_reset:
-                st.button("Reiniciar Página", type="secondary", use_container_width=True, on_click=reiniciar_pagina_callback)
+        if st.session_state.get("executar_processamento_gee") or st.session_state.get("processamento_gee_concluido"):
+            processar_gee_modal(selected_rows, df_filtrado)

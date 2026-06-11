@@ -3,19 +3,20 @@ import pandas as pd
 import datetime
 from modules.core import obter_metadados_salvos
 
-st.set_page_config(page_title="CELMM | Visualizar Metadados", page_icon="📊", layout="wide")
+st.set_page_config(page_title="CELMM | Explorar Metadados", page_icon="🛰️", layout="wide")
 
-st.title("CELMM - Visualizar Metadados")
+st.title("CELMM - Explorar Metadados")
+st.caption("Visualização de Metadados Processados e Salvos.")
 st.divider()
-
+st.text("")
 # Busca os dados no banco
 dados = obter_metadados_salvos()
 
 if not dados:
-    st.info("Nenhum metadado foi encontrado no banco de dados.")
+    st.info("Nenhum metadado de produto foi encontrado no banco de dados.")
     st.markdown("""
     Para popular o banco:
-    1. Vá para a página **CELMM - Analisar Metadados** no menu lateral.
+    1. Vá para a página **CELMM - Buscar Produtos** no menu lateral.
     2. Realize uma busca no Google Earth Engine.
     3. Clique no botão **Salvar no Banco de Dados** que aparecerá abaixo dos resultados.
     """)
@@ -122,26 +123,15 @@ else:
         
         # Contagem de zeros
         contagem_zeros = int((df_filtrado['pixels_validos'] == 0).sum())
-        
-        # Cálculo de aproveitamento baseando-se no maior valor do período
-        if max_pixels > 0:
-            aproveitamento = df_filtrado['pixels_validos'] / max_pixels
-            contagem_50 = int((aproveitamento >= 0.50).sum())
-            contagem_75 = int((aproveitamento >= 0.75).sum())
-        else:
-            contagem_50 = 0
-            contagem_75 = 0
     else:
         total_imagens = 0
         max_pixels = 0
         data_max_pixels = "N/A"
         contagem_zeros = 0
-        contagem_50 = 0
-        contagem_75 = 0
 
-    st.subheader("Estatística Básica")
+    st.subheader("Estatísticas dos Metadados")
     st.text("")
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
     
     def card_destacado(label, value, title_tooltip=None):
         tooltip_attr = f'title="{title_tooltip}"' if title_tooltip else ""
@@ -166,18 +156,16 @@ else:
         """
 
     with col1:
-        st.markdown(card_destacado("Total de Imagens", str(total_imagens)), unsafe_allow_html=True)
-        st.markdown(card_destacado("Imagens Nulas", str(contagem_zeros)), unsafe_allow_html=True)
+        st.markdown(card_destacado("Total de Produtos", str(total_imagens)), unsafe_allow_html=True)
     with col2:
         st.markdown(card_destacado("Máximo Pixels", f"{max_pixels:,}"), unsafe_allow_html=True)
-        st.markdown(card_destacado("Imagens com Aproveitamento ≥ 50%", str(contagem_50)), unsafe_allow_html=True)
     with col3:
-        st.markdown(card_destacado("Melhor Imagem", data_max_pixels, title_tooltip=data_max_pixels), unsafe_allow_html=True)
-        st.markdown(card_destacado("Imagens com Aproveitamento ≥ 75%", str(contagem_75)), unsafe_allow_html=True)
+        st.markdown(card_destacado("Melhor Produto", data_max_pixels, title_tooltip=data_max_pixels), unsafe_allow_html=True)
+    with col4:
+        st.markdown(card_destacado("Produtos Nulos", str(contagem_zeros)), unsafe_allow_html=True)
 
     st.divider()
 
-    st.subheader("Metadados Salvos")
     st.text("")
     if df_filtrado.empty:
         st.warning("Nenhum dado encontrado para os filtros selecionados.")
@@ -188,7 +176,7 @@ else:
             'id', 'data', 'satelite', 'z_grade_mgrs', 'tamanho_pixel', 'pixels_validos', 'data_registro'
         ]].rename(columns={
             'id': 'ID',
-            'data': 'Data da Imagem',
+            'data': 'Data do Produto',
             'satelite': 'Satélite',
             'z_grade_mgrs': 'Grade MGRS',
             'tamanho_pixel': 'Tamanho Pixel (m)',

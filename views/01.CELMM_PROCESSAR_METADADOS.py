@@ -4,11 +4,12 @@ import datetime
 import pandas as pd
 from modules.core import init_gee, salvar_metadados
 
-st.set_page_config(page_title="CELMM | Processar Metadados", page_icon="🛰️", layout="wide")
+st.set_page_config(page_title="CELMM | Buscar Produtos", page_icon="🛰️", layout="wide")
 
-st.title("CELMM - Processar Metadados")
-
+st.title("CELMM - Buscar Produtos")
+st.caption("Processa Metadados de Produtos no GEE. | Produtos Orbitais Sentinel II. | Recorte espacial CELMM-2026.")
 st.divider()
+st.text("")
 
 if not init_gee():
     st.stop()
@@ -16,7 +17,7 @@ if not init_gee():
 col1, col2 = st.columns(2)
 with col1:
     periodo = st.date_input(
-        "Período de Análise",
+        "Período:",
         value=(datetime.date(2023, 12, 1), datetime.date(2023, 12, 31))
     )
     if isinstance(periodo, tuple) and len(periodo) == 2:
@@ -26,7 +27,20 @@ with col1:
         st.stop()
 
 with col2:
-    pixel_size = st.number_input("Tamanho do Pixel (m)", value=20, step=10)
+    pixel_size_input = st.number_input("Tamanho do Pixel (m):", min_value=10, value=20, step=10)
+    pixel_size = int(pixel_size_input)
+
+# Validação do tamanho do pixel
+is_valid_pixel = True
+if pixel_size < 100:
+    if pixel_size % 10 != 0:
+        is_valid_pixel = False
+else:
+    if pixel_size % 100 != 0:
+        is_valid_pixel = False
+
+if not is_valid_pixel:
+    st.error("Tamanho do pixel inválido! O valor deve ser múltiplo de 10 (até 90) ou múltiplo de 100 (a partir de 100).")
 
 # Trava a cobertura máxima de nuvens em 100%
 max_clouds = 100
@@ -57,13 +71,11 @@ def preprocess_2(image, bands, CRS_original, pixel_size, ROI):
     else:
         final_image = select_image.clip(ROI)
     
-    mask_B4 = final_image.select('B4').mask()
-    
     # Redutor para contagem quantitativa de pixels válidos
-    pixel_count = mask_B4.reduceRegion(
-        reducer=ee.Reducer.sum(),
+    pixel_count = final_image.select('B4').reduceRegion(
+        reducer=ee.Reducer.count(),
         geometry=ROI.geometry(),
-        scale=pixel_size,
+        crs=final_image.select('B4').projection(),
         maxPixels=800000
     )  
     
@@ -86,9 +98,14 @@ if 'dados_tabela' not in st.session_state:
 if 'tamanho_pixel_salvo' not in st.session_state:
     st.session_state['tamanho_pixel_salvo'] = None
 
-col_run, _ = st.columns([2, 8])
+col_spacer, col_run = st.columns([9, 3])
 with col_run:
-    btn_processar = st.button("Processar Metadados", type="primary", use_container_width=True)
+    btn_processar = st.button(
+        "Processar Metadados", 
+        type="primary", 
+        use_container_width=True,
+        disabled=not is_valid_pixel
+    )
 
 if btn_processar:
     st.session_state['dados_tabela'] = None
@@ -137,7 +154,7 @@ if btn_processar:
             features = results_info.get('features', [])
 
             if not features:
-                st.warning("Nenhuma imagem encontrada com os critérios definidos.")
+                st.warning("Nenhum produto encontrado com os critérios definidos.")
             else:
                 # Transforma a resposta JSON em um DataFrame Pandas para melhor visualização
                 dados_tabela = [f['properties'] for f in features]
@@ -162,21 +179,25 @@ if st.session_state['dados_tabela'] is not None:
     st.success(f"Processamento concluído! {len(df_resultados)} imagens analisadas.")
     st.dataframe(df_resultados, use_container_width=True)
 
-    col_save, coluna_reset, _ = st.columns([2,2,6])
+    col_spacer, col_reset, col_save = st.columns([6, 3, 3])
+    salvo_sucesso = False
+    
+    with col_reset:
+        btn_resetar = st.button("Reiniciar Processamento", type="secondary", use_container_width=True)
+
     with col_save:
-        if st.button("Salvar no Banco de Dados", type="primary"):
+        if st.button("Salvar no Banco de Dados", type="primary", use_container_width=True):
             with st.spinner("Salvando registros no PostgreSQL..."):
-                sucesso = salvar_metadados(
+                if salvar_metadados(
                     st.session_state['dados_tabela'], 
                     st.session_state['tamanho_pixel_salvo']
-                )
-                if sucesso:
-                    st.success("Dados salvos/atualizados com sucesso no banco de dados!")
-
-    with coluna_reset:
-        btn_resetar = st.button("Reiniciar Processamento", type="secondary", use_container_width=True)
+                ):
+                    salvo_sucesso = True
 
     if btn_resetar:
         st.session_state['dados_tabela'] = None
         st.session_state['tamanho_pixel_salvo'] = None
         st.rerun()
+
+    if salvo_sucesso:
+        st.success("Dados salvos/atualizados com sucesso no banco de dados!")

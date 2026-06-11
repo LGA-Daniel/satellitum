@@ -3,17 +3,18 @@ import pandas as pd
 import datetime
 import os
 import shutil
-from modules.core import obter_metadados_salvos, listar_arquivos_pasta_drive, baixar_arquivo_drive_para_disco, salvar_pixels_bulk
+from modules.core import obter_metadados_salvos, listar_arquivos_pasta_drive, baixar_arquivo_drive_para_disco, salvar_pixels_bulk, obter_ids_imagens_com_pixels
 
-st.set_page_config(page_title="CELMM | Status no Google Drive", page_icon="📂", layout="wide")
+st.set_page_config(page_title="CELMM | Sincronizar Produtos", page_icon="🛰️", layout="wide")
 
-st.title("CELMM - Status no Google Drive 📂")
+st.title("CELMM - Sincronizar Produtos")
 st.divider()
 
 # Carregamento dos dados em paralelo com indicador visual
-with st.spinner("Buscando dados no banco e conectando ao Google Drive..."):
+with st.spinner("Buscando Arquivos"):
     dados = obter_metadados_salvos()
     arquivos_drive = listar_arquivos_pasta_drive("CSV_Sentinel2")
+    ids_com_pixels = obter_ids_imagens_com_pixels()
 
 # Cria um set dos nomes dos arquivos no Drive para busca rápida O(1)
 nomes_arquivos_drive = {arq.get('name') for arq in arquivos_drive if arq.get('name')}
@@ -22,6 +23,16 @@ nomes_arquivos_drive = {arq.get('name') for arq in arquivos_drive if arq.get('na
 module_dir = os.path.dirname(os.path.abspath(__file__))
 project_root = os.path.dirname(module_dir)
 temp_dir = os.path.join(project_root, "temp_downloads")
+
+def resetar_estado_processamento():
+    """Reseta as flags de processamento no session_state para evitar que o modal abra automaticamente ao interagir com a página."""
+    st.session_state["executar_processamento"] = False
+    st.session_state["processamento_concluido"] = False
+    if "logs_processamento" in st.session_state:
+        try:
+            del st.session_state["logs_processamento"]
+        except KeyError:
+            pass
 
 def limpar_pasta_temporaria():
     """Apaga e recria de forma limpa a pasta de downloads temporários."""
@@ -43,7 +54,7 @@ def baixar_arquivos_conteudo(valid_selected, map_nome_id):
             
             for idx, row in valid_selected.iterrows():
                 # Converte a data para string YYYY-MM-DD
-                date_str = row["Data da Imagem"].strftime('%Y-%m-%d') if isinstance(row["Data da Imagem"], (datetime.date, datetime.datetime)) else str(row["Data da Imagem"])
+                date_str = row["Data do Produto"].strftime('%Y-%m-%d') if isinstance(row["Data do Produto"], (datetime.date, datetime.datetime)) else str(row["Data do Produto"])
                 nome_esperado = f"CELMM_Data_{date_str}_{int(row['Tamanho Pixel (m)'])}m.csv"
                 fid = map_nome_id.get(nome_esperado)
                 if fid:
@@ -60,7 +71,7 @@ def baixar_arquivos_conteudo(valid_selected, map_nome_id):
                 
                 with open(local_file_path, "rb") as f:
                     st.download_button(
-                        label="Salvar Arquivo no Computador 💾",
+                        label="Salvar Arquivo no Computador",
                         data=f,
                         file_name=filename,
                         mime="text/csv",
@@ -79,7 +90,7 @@ def baixar_arquivos_conteudo(valid_selected, map_nome_id):
                         
                 with open(zip_path, "rb") as f:
                     st.download_button(
-                        label="Salvar Arquivo ZIP no Computador 💾",
+                        label="Salvar Arquivo ZIP no Computador",
                         data=f,
                         file_name=zip_filename,
                         mime="application/zip",
@@ -103,14 +114,15 @@ def processar_csv_conteudo(valid_selected, map_nome_id):
         # Impede reexecuções em reruns subsequentes
         st.session_state["executar_processamento"] = False
         
+        import time
         logs = []
         st.write(f"Iniciando o processamento de **{len(valid_selected)}** arquivo(s) disponível(is).")
-        progresso_geral = st.progress(0.0)
+        progresso_geral = st.progress(0.0, text="Progresso Geral: 0%")
         status_geral = st.empty()
         
         for i, (idx, row) in enumerate(valid_selected.iterrows()):
             img_id = int(row['id'])
-            date_str = row["Data da Imagem"].strftime('%Y-%m-%d') if isinstance(row["Data da Imagem"], (datetime.date, datetime.datetime)) else str(row["Data da Imagem"])
+            date_str = row["Data do Produto"].strftime('%Y-%m-%d') if isinstance(row["Data do Produto"], (datetime.date, datetime.datetime)) else str(row["Data do Produto"])
             pixel_size = int(row['Tamanho Pixel (m)'])
             satelite = str(row['Satélite'])
             grade = str(row['Grade MGRS']) if pd.notna(row['Grade MGRS']) else None
@@ -119,27 +131,35 @@ def processar_csv_conteudo(valid_selected, map_nome_id):
             nome_esperado = f"CELMM_Data_{date_str}_{pixel_size}m.csv"
             dest_path = os.path.join(temp_dir, nome_esperado)
             
-            status_geral.info(f"**Imagem {i+1} de {len(valid_selected)}:** `{nome_esperado}`")
+            status_geral.info(f"**Produto {i+1} de {len(valid_selected)}:** `{nome_esperado}`")
+            
+            # Progress bar para as etapas deste produto
+            barra_etapas = st.progress(0.0, text="Iniciando processamento do produto...")
             
             # 1. Download se necessário
             if not os.path.exists(dest_path):
                 fid = map_nome_id.get(nome_esperado)
                 if not fid:
-                    logs.append(f"❌ Imagem {date_str} ({pixel_size}m): Arquivo não encontrado no Google Drive.")
+                    logs.append(f"❌ Produto {date_str} ({pixel_size}m): Arquivo não encontrado no Google Drive.")
+                    barra_etapas.empty()
                     continue
-                status_geral.text(f"Baixando `{nome_esperado}` do Drive...")
+                barra_etapas.progress(0.1, text="Etapa 1/5: Baixando arquivo do Google Drive...")
                 try:
                     baixar_arquivo_drive_para_disco(fid, dest_path)
                 except Exception as e:
-                    logs.append(f"❌ Imagem {date_str} ({pixel_size}m): Erro ao baixar: {e}")
+                    logs.append(f"❌ Produto {date_str} ({pixel_size}m): Erro ao baixar: {e}")
+                    barra_etapas.empty()
                     continue
             
             # 2. Leitura e Ingestão via COPY
             if os.path.exists(dest_path):
                 try:
-                    status_geral.text(f"Lendo e preparando `{nome_esperado}`...")
+                    # Passo A: Ler CSV completo
+                    barra_etapas.progress(0.3, text="Etapa 2/5: Carregando arquivo CSV na memória...")
                     df = pd.read_csv(dest_path)
                     
+                    # Passo B: Limpeza e formatação de colunas
+                    barra_etapas.progress(0.5, text="Etapa 3/5: Realizando limpeza de dados e injeção de metadados...")
                     rename_dict = {
                         'system:index': 'system_index',
                         '.geo': 'geo'
@@ -164,18 +184,28 @@ def processar_csv_conteudo(valid_selected, map_nome_id):
                         return str(val)
                     df['system_index'] = df['system_index'].apply(converter_system_index)
                     
-                    status_geral.text(f"Transmitindo via COPY...")
+                    # Passo C: Executar o COPY via core.py
+                    barra_etapas.progress(0.7, text="Etapa 4/5: Transmitindo dados via COPY e resolvendo conflitos...")
                     inseridos = salvar_pixels_bulk(df)
-                    logs.append(f"✅ Imagem {date_str} ({pixel_size}m): {inseridos:,} pixels importados com sucesso.")
+                    logs.append(f"✅ Produto {date_str} ({pixel_size}m): {inseridos:,} pixels importados com sucesso.")
                     
+                    # Passo D: Limpeza local
+                    barra_etapas.progress(1.0, text="Etapa 5/5: Finalizando e limpando arquivos temporários locais...")
                     try:
                         os.remove(dest_path)
                     except Exception:
                         pass
-                except Exception as e:
-                    logs.append(f"❌ Imagem {date_str} ({pixel_size}m): Erro no processamento: {e}")
+                        
+                    st.success(f"Sucesso: {inseridos:,} pixels importados/atualizados para `{nome_esperado}`!")
                     
-            progresso_geral.progress((i + 1) / len(valid_selected))
+                except Exception as e:
+                    logs.append(f"❌ Produto {date_str} ({pixel_size}m): Erro no processamento: {e}")
+                
+                # Aguarda meio segundo para exibição visual do estado de conclusão da etapa antes de limpar
+                time.sleep(0.5)
+                barra_etapas.empty()
+                    
+            progresso_geral.progress((i + 1) / len(valid_selected), text=f"Progresso Geral: {int((i + 1) / len(valid_selected) * 100)}%")
             
         st.session_state["logs_processamento"] = logs
         st.session_state["processamento_concluido"] = True
@@ -190,11 +220,7 @@ def processar_csv_conteudo(valid_selected, map_nome_id):
             else:
                 st.error(log)
                 
-        if st.button("Fechar 🚪", use_container_width=True):
-            st.session_state["processamento_concluido"] = False
-            if "logs_processamento" in st.session_state:
-                del st.session_state["logs_processamento"]
-            st.rerun()
+
 
 # Definição dinâmica do modal de processamento para suportar retrocompatibilidade do Streamlit
 if hasattr(st, "dialog"):
@@ -227,6 +253,7 @@ else:
         return "Disponível ✅" if nome_esperado in nomes_arquivos_drive else "Não Encontrado ❌"
         
     df['Status no Drive'] = df.apply(verificar_disponibilidade, axis=1)
+    df['Importado para o Banco'] = df['id'].apply(lambda x: "Salvo ✅" if x in ids_com_pixels else "Pendente ⏳")
 
     # 1. Filtros no Expander (Cópia exata do layout da página de baixar imagens)
     with st.expander("Filtros", expanded=True):
@@ -238,7 +265,8 @@ else:
             satelites_selecionados = st.multiselect(
                 "Satélite",
                 options=satelites_disponiveis,
-                default=satelites_disponiveis
+                default=satelites_disponiveis,
+                on_change=resetar_estado_processamento
             )
 
             # Filtro de Grade MGRS
@@ -246,7 +274,8 @@ else:
             grades_selecionadas = st.multiselect(
                 "Grade MGRS",
                 options=grades_disponiveis,
-                default=grades_disponiveis
+                default=grades_disponiveis,
+                on_change=resetar_estado_processamento
             )
 
         with col_f2:
@@ -256,7 +285,8 @@ else:
             pixel_selecionado = st.selectbox(
                 "Tamanho do Pixel (m)",
                 options=opcoes_pixel,
-                index=0
+                index=0,
+                on_change=resetar_estado_processamento
             )
 
             # Filtro de Período
@@ -272,7 +302,8 @@ else:
                     "Período",
                     value=(data_min, data_max),
                     min_value=data_min,
-                    max_value=data_max
+                    max_value=data_max,
+                    on_change=resetar_estado_processamento
                 )
                 if isinstance(periodo, tuple) and len(periodo) == 2:
                     data_inicio, data_fim = periodo
@@ -280,7 +311,7 @@ else:
                     data_inicio, data_fim = data_min, data_max
 
         # Filtro: Somente disponíveis no Drive (toggle)
-        apenas_disponiveis = st.toggle("Somente disponíveis no Drive", value=False)
+        apenas_disponiveis = st.toggle("Somente disponíveis no Drive", value=False, on_change=resetar_estado_processamento)
 
         # Filtro de Intervalo de Pixels Válidos (Slider de Intervalo)
         min_pixels_val = int(df['pixels_validos'].min()) if not df.empty else 0
@@ -291,7 +322,8 @@ else:
                 "Pixels Válidos",
                 min_value=min_pixels_val,
                 max_value=max_pixels_val,
-                value=(min_pixels_val, max_pixels_val)
+                value=(min_pixels_val, max_pixels_val),
+                on_change=resetar_estado_processamento
             )
         else:
             pixels_range = (min_pixels_val, max_pixels_val)
@@ -317,16 +349,16 @@ else:
         st.warning("Nenhum dado encontrado para os filtros selecionados.")
     else:
         # Adiciona caixa para controle rápido de marcação
-        selecionar_padrao = st.checkbox("Marcar todas", value=False)
+        selecionar_padrao = st.checkbox("Marcar todas", value=False, on_change=resetar_estado_processamento)
         
         df_display = df_filtrado.copy()
         df_display.insert(0, "Selecionar", selecionar_padrao)
         
         # Seleciona e renomeia as colunas para exibição amigável
         df_to_edit = df_display[[
-            'Selecionar', 'id', 'data', 'satelite', 'z_grade_mgrs', 'tamanho_pixel', 'pixels_validos', 'zenital', 'Status no Drive'
+            'Selecionar', 'id', 'data', 'satelite', 'z_grade_mgrs', 'tamanho_pixel', 'pixels_validos', 'zenital', 'Status no Drive', 'Importado para o Banco'
         ]].rename(columns={
-            'data': 'Data da Imagem',
+            'data': 'Data do Produto',
             'satelite': 'Satélite',
             'z_grade_mgrs': 'Grade MGRS',
             'tamanho_pixel': 'Tamanho Pixel (m)',
@@ -344,21 +376,23 @@ else:
         edited_df = st.data_editor(
             df_to_edit,
             key=editor_key,
+            on_change=resetar_estado_processamento,
             hide_index=True,
             column_config={
                 "Selecionar": st.column_config.CheckboxColumn(
                     "Selecionar",
-                    help="Selecione as imagens para download ou processamento",
+                    help="Selecione os produtos para download ou processamento",
                     default=selecionar_padrao,
                 ),
                 "id": None,  # Oculta a coluna id
                 "zenital": None,  # Oculta a coluna zenital
-                "Data da Imagem": st.column_config.DateColumn("Data da Imagem", format="YYYY-MM-DD", width="medium"),
+                "Data do Produto": st.column_config.DateColumn("Data do Produto", format="YYYY-MM-DD", width="medium"),
                 "Satélite": st.column_config.TextColumn("Satélite", width="small"),
                 "Grade MGRS": st.column_config.TextColumn("Grade MGRS", width="small"),
                 "Tamanho Pixel (m)": st.column_config.NumberColumn("Tamanho Pixel (m)", width="small"),
                 "Pixels Válidos": st.column_config.NumberColumn("Pixels Válidos", width="medium"),
-                "Status no Drive": st.column_config.TextColumn("Status no Drive", width="medium")
+                "Status no Drive": st.column_config.TextColumn("Status no Drive", width="medium"),
+                "Importado para o Banco": st.column_config.TextColumn("Status no Banco", width="medium")
             },
             disabled=[c for c in df_to_edit.columns if c != "Selecionar"],
             use_container_width=True
@@ -372,35 +406,37 @@ else:
         # Filtra apenas os selecionados que estão disponíveis no Drive
         valid_selected = selected_rows[selected_rows["Status no Drive"] == "Disponível ✅"]
         
-        col_btn1, col_btn2, _ = st.columns([4.2, 4.5, 3.3])
+        col_spacer, col_process_db, col_download = st.columns([6, 3, 3])
         
-        with col_btn1:
+        with col_process_db:
             if not valid_selected.empty:
-                if st.button("Baixar arquivos 📥", type="primary", use_container_width=True):
-                    baixar_arquivos_modal(valid_selected, map_nome_id)
-            else:
-                st.button(
-                    "Baixar arquivos 📥", 
-                    type="primary", 
-                    use_container_width=True, 
-                    disabled=True, 
-                    help="Marque pelo menos uma imagem com status 'Disponível ✅'."
-                )
-                
-        with col_btn2:
-            if not valid_selected.empty:
-                if st.button("Processar CSV para a Base de Dados ⚙️", type="secondary", use_container_width=True):
+                if st.button("Sincronizar com o Banco de Dados", type="secondary", use_container_width=True, key="btn_sincronizar_ativos"):
                     st.session_state["executar_processamento"] = True
                     st.session_state["processamento_concluido"] = False
                     st.session_state["logs_processamento"] = []
                     st.rerun()
             else:
                 st.button(
-                    "Processar CSV para a Base de Dados ⚙️", 
+                    "Sincronizar com o Banco de Dados", 
                     type="secondary", 
                     use_container_width=True, 
                     disabled=True, 
-                    help="Marque pelo menos uma imagem com status 'Disponível ✅'."
+                    help="Marque pelo menos um produto com status 'Disponível ✅'.",
+                    key="btn_sincronizar_inativos"
+                )
+                
+        with col_download:
+            if not valid_selected.empty:
+                if st.button("Baixar Arquivos", type="primary", use_container_width=True, key="btn_baixar_ativos"):
+                    baixar_arquivos_modal(valid_selected, map_nome_id)
+            else:
+                st.button(
+                    "Baixar Arquivos", 
+                    type="primary", 
+                    use_container_width=True, 
+                    disabled=True, 
+                    help="Marque pelo menos um produto com status 'Disponível ✅'.",
+                    key="btn_baixar_inativos"
                 )
                 
         # Renderiza o modal condicionalmente de acordo com o estado do session_state

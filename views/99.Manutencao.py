@@ -4,9 +4,9 @@ from contextlib import redirect_stdout
 from modules.core import engine
 from sqlalchemy import inspect
 
-st.set_page_config(page_title="Satellitum | Manutenção", page_icon="⚙️", layout="wide")
+st.set_page_config(page_title="Satellitum | Configurações do Sistema", page_icon="🛰️", layout="wide")
 
-st.title("Manutenção do Sistema")
+st.title("Configurações do Sistema")
 st.divider()
 
 # Inicializa logs no session_state para que sobrevivam ao rerun
@@ -47,6 +47,6 @@ if st.session_state["logs_banco"]:
     
     col_clear, _ = st.columns([2, 10])
     with col_clear:
-        if st.button("Limpar Logs 🗑️", use_container_width=True):
+        if st.button("Limpar Logs", use_container_width=True):
             st.session_state["logs_banco"] = ""
             st.rerun()
