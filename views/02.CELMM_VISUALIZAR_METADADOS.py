@@ -107,6 +107,9 @@ else:
         (df['pixels_validos'] <= pixels_range[1])
     ]
 
+    # Contagem de zeros (produtos com 0 pixels válidos no conjunto filtrado)
+    contagem_zeros = int((df_filtrado['pixels_validos'] == 0).sum())
+
     # 2. Seção de Indicadores Gerais
     if not df_filtrado.empty:
         total_imagens = len(df_filtrado)
@@ -120,14 +123,10 @@ else:
         
         # Junta todas as datas formatadas separadas por vírgula
         data_max_pixels = ", ".join([d.strftime('%d/%m/%Y') for d in datas_max])
-        
-        # Contagem de zeros
-        contagem_zeros = int((df_filtrado['pixels_validos'] == 0).sum())
     else:
         total_imagens = 0
         max_pixels = 0
         data_max_pixels = "N/A"
-        contagem_zeros = 0
 
     st.subheader("Estatísticas dos Metadados")
     st.text("")
