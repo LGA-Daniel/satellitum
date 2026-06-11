@@ -86,7 +86,7 @@ def exportar_conteudo_modal(ids_imagens, tipo_formato):
             excel_buffer.seek(0)
             file_data = excel_buffer.getvalue()
         except ImportError:
-            st.error("⚠️ Erro: Suporte a Excel indisponível. Reconstrua a stack Docker (`docker compose up --build -d`).")
+            st.error("Erro: Suporte a Excel indisponível. Reconstrua a stack Docker (`docker compose up --build -d`).")
             st.stop()
         mime_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         file_ext = "xlsx"
@@ -115,10 +115,10 @@ def exportar_conteudo_modal(ids_imagens, tipo_formato):
     )
 
 if hasattr(st, "dialog"):
-    modal_exportar = st.dialog("Preparando Exportação de Dados ⚙️")(exportar_conteudo_modal)
+    modal_exportar = st.dialog("Preparando Exportação de Dados")(exportar_conteudo_modal)
 else:
     def modal_exportar(ids_imagens, tipo_formato):
-        with st.expander("Preparando Exportação de Dados ⚙️", expanded=True):
+        with st.expander("Preparação do Download", expanded=True):
             exportar_conteudo_modal(ids_imagens, tipo_formato)
 
 st.set_page_config(page_title="CELMM | Prévia de Dados", page_icon="🛰️", layout="wide")
@@ -128,7 +128,7 @@ st.caption("Visualização rápida das primeiras 500 linhas dos dados de pixels 
 st.divider()
 
 if "df_pixels_carregados" not in st.session_state or st.session_state["df_pixels_carregados"] is None:
-    st.warning("⚠️ Nenhum dado carregado na sessão para visualização.")
+    st.warning("Nenhum dado carregado na sessão para visualização.")
     if st.button("Voltar para Exportador", type="primary", use_container_width=True, key="btn_voltar_no_data"):
         st.switch_page("views/05.CELMM_VISUALIZAR_DADOS.py")
 else:

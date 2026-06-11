@@ -3,6 +3,7 @@ import pandas as pd
 import datetime
 import os
 import shutil
+import inspect
 from modules.core import (
     obter_metadados_salvos, 
     listar_arquivos_pasta_drive, 
@@ -38,11 +39,26 @@ def resetar_estado_processamento():
     """Reseta as flags de processamento no session_state para evitar que o modal abra automaticamente ao interagir com a página."""
     st.session_state["executar_processamento"] = False
     st.session_state["processamento_concluido"] = False
+    st.session_state["confirmar_sobrescrever_pixels"] = False
+    st.session_state["pixels_dados_conflito"] = []
     if "logs_processamento" in st.session_state:
         try:
             del st.session_state["logs_processamento"]
         except KeyError:
             pass
+
+if 'reset_counter' not in st.session_state:
+    st.session_state['reset_counter'] = 0
+
+def limpar_filtros_callback():
+    st.session_state['reset_counter'] += 1
+    resetar_estado_processamento()
+
+def on_dismiss_csv_callback():
+    if "tarefa_id_monitorada" in st.session_state:
+        tid = st.session_state["tarefa_id_monitorada"]
+        st.session_state[f"tarefa_dismissed_{tid}"] = True
+        del st.session_state["tarefa_id_monitorada"]
 
 def limpar_pasta_temporaria():
     """Apaga e recria de forma limpa a pasta de downloads temporários."""
@@ -112,10 +128,10 @@ def baixar_arquivos_conteudo(valid_selected, map_nome_id):
 
 # Definição dinâmica do modal para suportar retrocompatibilidade do Streamlit
 if hasattr(st, "dialog"):
-    baixar_arquivos_modal = st.dialog("Baixar Arquivos do Google Drive 📥")(baixar_arquivos_conteudo)
+    baixar_arquivos_modal = st.dialog("Baixar Arquivos do Google Drive")(baixar_arquivos_conteudo)
 else:
     def baixar_arquivos_modal(valid_selected, map_nome_id):
-        with st.expander("Preparação do Download 📥", expanded=True):
+        with st.expander("Preparação do Download", expanded=True):
             baixar_arquivos_conteudo(valid_selected, map_nome_id)
 
 # Função contendo a lógica de processamento do CSV para o banco
@@ -125,8 +141,9 @@ def processar_csv_conteudo(tarefa_id):
     t = obter_status_tarefa(tarefa_id)
     if not t:
         st.error("Tarefa não encontrada.")
-        if st.button("Fechar", type="primary", use_container_width=True):
+        if st.button("Fechar", type="primary", use_container_width=True, key=f"btn_close_not_found_csv_{tarefa_id}"):
             if "tarefa_id_monitorada" in st.session_state:
+                st.session_state[f"tarefa_dismissed_{st.session_state['tarefa_id_monitorada']}"] = True
                 del st.session_state["tarefa_id_monitorada"]
             st.rerun()
         return
@@ -144,7 +161,7 @@ def processar_csv_conteudo(tarefa_id):
         pct = processados / total if total > 0 else 0.0
         st.progress(pct, text=f"Processando CSVs: {processados}/{total} arquivos ({int(pct*100)}%)")
     elif status == "concluido":
-        st.success("Sincronização concluída com sucesso! 🎉")
+        st.success("Sincronização concluída com sucesso!")
         st.progress(1.0)
     elif status == "cancelado":
         st.warning("Processamento cancelado pelo usuário.")
@@ -158,10 +175,18 @@ def processar_csv_conteudo(tarefa_id):
 
     # Botões de ação baseados no status
     if status in ["pendente", "processando"]:
-        if st.button("Cancelar Processamento", type="secondary", use_container_width=True):
-            cancelar_tarefa(tarefa_id)
-            st.toast("Cancelamento solicitado.")
-            st.rerun()
+        col_btn1, col_btn2 = st.columns(2)
+        with col_btn1:
+            if st.button("Cancelar Processamento", type="secondary", use_container_width=True, key=f"btn_cancel_csv_{tarefa_id}"):
+                cancelar_tarefa(tarefa_id)
+                st.toast("Cancelamento solicitado.")
+                st.rerun()
+        with col_btn2:
+            if st.button("Esconder Progresso", type="primary", use_container_width=True, key=f"btn_hide_csv_{tarefa_id}"):
+                st.session_state[f"tarefa_dismissed_{tarefa_id}"] = True
+                if "tarefa_id_monitorada" in st.session_state:
+                    del st.session_state["tarefa_id_monitorada"]
+                st.rerun()
         # Atualização automática da modal
         time.sleep(2)
         st.rerun()
@@ -173,21 +198,29 @@ def processar_csv_conteudo(tarefa_id):
                 data=logs,
                 file_name=f"log_ingestao_tarefa_{tarefa_id}_{datetime.date.today()}.txt",
                 mime="text/plain",
-                use_container_width=True
+                use_container_width=True,
+                key=f"btn_download_logs_csv_{tarefa_id}"
             )
         with col_c2:
-            if st.button("Fechar", type="primary", use_container_width=True):
+            if st.button("Fechar", type="primary", use_container_width=True, key=f"btn_close_csv_{tarefa_id}"):
                 if "tarefa_id_monitorada" in st.session_state:
+                    st.session_state[f"tarefa_dismissed_{st.session_state['tarefa_id_monitorada']}"] = True
                     del st.session_state["tarefa_id_monitorada"]
                 st.rerun()
 
 if hasattr(st, "dialog"):
-    @st.dialog("Processar CSV para a Base de Dados ⚙️")
-    def processar_csv_modal(tid):
-        processar_csv_conteudo(tid)
+    sig = inspect.signature(st.dialog)
+    if 'on_dismiss' in sig.parameters:
+        @st.dialog("Processar CSV para a Base de Dados", dismissible=False, on_dismiss=on_dismiss_csv_callback)
+        def processar_csv_modal(tid):
+            processar_csv_conteudo(tid)
+    else:
+        @st.dialog("Processar CSV para a Base de Dados", dismissible=False)
+        def processar_csv_modal(tid):
+            processar_csv_conteudo(tid)
 else:
     def processar_csv_modal(tid):
-        with st.expander("Processamento de CSV ⚙️", expanded=True):
+        with st.expander("Processamento de CSV", expanded=True):
             processar_csv_conteudo(tid)
 
 
@@ -214,7 +247,10 @@ else:
         return "Disponível ✅" if nome_esperado in nomes_arquivos_drive else "Não Encontrado ❌"
         
     df['Status no Drive'] = df.apply(verificar_disponibilidade, axis=1)
-    df['Importado para o Banco'] = df['id'].apply(lambda x: "Salvo ✅" if x in ids_com_pixels else "Pendente ⏳")
+    df['Importado para o Banco'] = df.apply(
+        lambda r: "Salvo ✅" if (r['id'] in ids_com_pixels or (r['pixels_validos'] == 0 and r['Status no Drive'] == "Disponível ✅")) else "Pendente ⏳",
+        axis=1
+    )
 
     # 1. Filtros no Expander (Cópia exata do layout da página de baixar imagens)
     with st.expander("Filtros", expanded=True):
@@ -227,7 +263,8 @@ else:
                 "Satélite",
                 options=satelites_disponiveis,
                 default=satelites_disponiveis,
-                on_change=resetar_estado_processamento
+                on_change=resetar_estado_processamento,
+                key=f"filtro_satelite_{st.session_state['reset_counter']}"
             )
 
             # Filtro de Grade MGRS
@@ -236,7 +273,8 @@ else:
                 "Grade MGRS",
                 options=grades_disponiveis,
                 default=grades_disponiveis,
-                on_change=resetar_estado_processamento
+                on_change=resetar_estado_processamento,
+                key=f"filtro_grade_{st.session_state['reset_counter']}"
             )
 
         with col_f2:
@@ -247,7 +285,8 @@ else:
                 "Tamanho do Pixel (m)",
                 options=opcoes_pixel,
                 index=0,
-                on_change=resetar_estado_processamento
+                on_change=resetar_estado_processamento,
+                key=f"filtro_pixel_sz_{st.session_state['reset_counter']}"
             )
 
             # Filtro de Período
@@ -264,30 +303,57 @@ else:
                     value=(data_min, data_max),
                     min_value=data_min,
                     max_value=data_max,
-                    on_change=resetar_estado_processamento
+                    on_change=resetar_estado_processamento,
+                    key=f"filtro_periodo_{st.session_state['reset_counter']}"
                 )
                 if isinstance(periodo, tuple) and len(periodo) == 2:
                     data_inicio, data_fim = periodo
                 else:
                     data_inicio, data_fim = data_min, data_max
 
-        # Filtro: Somente disponíveis no Drive (toggle)
-        apenas_disponiveis = st.toggle("Somente disponíveis no Drive", value=False, on_change=resetar_estado_processamento)
-
-        # Filtro de Intervalo de Pixels Válidos (Slider de Intervalo)
-        min_pixels_val = int(df['pixels_validos'].min()) if not df.empty else 0
-        max_pixels_val = int(df['pixels_validos'].max()) if not df.empty else 0
-        
-        if min_pixels_val < max_pixels_val:
-            pixels_range = st.slider(
-                "Pixels Válidos",
-                min_value=min_pixels_val,
-                max_value=max_pixels_val,
-                value=(min_pixels_val, max_pixels_val),
-                on_change=resetar_estado_processamento
-            )
+        # Filtro de Intervalo de Pixels Válidos, Toggles de Status e Botão de Limpar Filtro
+        has_valign = 'vertical_alignment' in inspect.signature(st.columns).parameters
+        if has_valign:
+            col_slider, col_t1, col_t2, col_clear = st.columns([6, 2, 2, 2.5], vertical_alignment="bottom")
         else:
-            pixels_range = (min_pixels_val, max_pixels_val)
+            col_slider, col_t1, col_t2, col_clear = st.columns([6, 2, 2, 2.5])
+        with col_slider:
+            min_pixels_val = int(df['pixels_validos'].min()) if not df.empty else 0
+            max_pixels_val = int(df['pixels_validos'].max()) if not df.empty else 0
+            
+            if min_pixels_val < max_pixels_val:
+                pixels_range = st.slider(
+                    "Pixels Válidos",
+                    min_value=min_pixels_val,
+                    max_value=max_pixels_val,
+                    value=(min_pixels_val, max_pixels_val),
+                    on_change=resetar_estado_processamento,
+                    key=f"filtro_pixels_range_{st.session_state['reset_counter']}"
+                )
+            else:
+                pixels_range = (min_pixels_val, max_pixels_val)
+        with col_t1:
+            if not has_valign:
+                st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+            status_drive_toggle = st.toggle(
+                "Somente Disponíveis", 
+                value=False, 
+                on_change=resetar_estado_processamento, 
+                key=f"filtro_status_drive_{st.session_state['reset_counter']}"
+            )
+        with col_t2:
+            if not has_valign:
+                st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+            status_banco_toggle = st.toggle(
+                "Somente Pendentes", 
+                value=False, 
+                on_change=resetar_estado_processamento, 
+                key=f"filtro_status_banco_{st.session_state['reset_counter']}"
+            )
+        with col_clear:
+            if not has_valign:
+                st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+            st.button("Limpar Filtro", type="secondary", use_container_width=True, on_click=limpar_filtros_callback)
 
     # Aplicação final dos filtros
     df_filtrado = df[
@@ -300,9 +366,15 @@ else:
         (df['pixels_validos'] <= pixels_range[1])
     ]
 
-    # Aplica o filtro do toggle (Somente disponíveis no Drive)
-    if apenas_disponiveis:
-        df_filtrado = df_filtrado[df_filtrado['Status no Drive'] == "Disponível ✅"]
+    # Aplica o filtro de status do Drive conforme o toggle (Apenas se ativado)
+    if not df_filtrado.empty:
+        if status_drive_toggle:
+            df_filtrado = df_filtrado[df_filtrado['Status no Drive'] == "Disponível ✅"]
+
+    # Aplica o filtro de status do banco conforme o toggle (Apenas se ativado)
+    if not df_filtrado.empty:
+        if status_banco_toggle:
+            df_filtrado = df_filtrado[df_filtrado['Importado para o Banco'] == "Pendente ⏳"]
 
     st.text("")
 
@@ -330,7 +402,7 @@ else:
         map_nome_id = {arq.get('name'): arq.get('id') for arq in arquivos_drive if arq.get('name') and arq.get('id')}
         
         # Gera uma chave estável e única baseada nos filtros ativos
-        filtro_str = f"{sorted(satelites_selecionados)}_{sorted(grades_selecionadas)}_{pixel_selecionado}_{data_inicio}_{data_fim}_{pixels_range}_{apenas_disponiveis}"
+        filtro_str = f"{sorted(satelites_selecionados)}_{sorted(grades_selecionadas)}_{pixel_selecionado}_{data_inicio}_{data_fim}_{pixels_range}_{status_drive_toggle}_{status_banco_toggle}"
         editor_key = f"editor_drive_{hash(filtro_str)}"
         
         # Exibe a lista interativa com caixa de seleção (checkbox) por linha
@@ -352,8 +424,8 @@ else:
                 "Grade MGRS": st.column_config.TextColumn("Grade MGRS", width="small"),
                 "Tamanho Pixel (m)": st.column_config.NumberColumn("Tamanho Pixel (m)", width="small"),
                 "Pixels Válidos": st.column_config.NumberColumn("Pixels Válidos", width="medium"),
-                "Status no Drive": st.column_config.TextColumn("Status no Drive", width="medium"),
-                "Importado para o Banco": st.column_config.TextColumn("Status no Banco", width="medium")
+                "Status no Drive": st.column_config.TextColumn("Arquivo CSV", width="medium"),
+                "Importado para o Banco": st.column_config.TextColumn("Banco de Dados", width="medium")
             },
             disabled=[c for c in df_to_edit.columns if c != "Selecionar"],
             use_container_width=True
@@ -365,7 +437,8 @@ else:
         if "tarefa_id_monitorada" not in st.session_state:
             tarefa_ativa = obter_tarefa_ativa()
             if tarefa_ativa and tarefa_ativa["tipo_tarefa"] == "CSV_INGEST":
-                st.session_state["tarefa_id_monitorada"] = tarefa_ativa["id"]
+                if not st.session_state.get(f"tarefa_dismissed_{tarefa_ativa['id']}", False):
+                    st.session_state["tarefa_id_monitorada"] = tarefa_ativa["id"]
 
         # Seleciona os registros marcados
         selected_rows = edited_df[edited_df["Selecionar"] == True]
@@ -409,30 +482,77 @@ else:
                     key="btn_baixar_inativos"
                 )
 
-        if btn_sinc and not valid_selected.empty:
-            # Prepara o payload para a fila
-            selected_rows_list = []
-            for _, r in valid_selected.iterrows():
-                d_str = r['Data do Produto'].strftime('%Y-%m-%d') if isinstance(r['Data do Produto'], (datetime.date, datetime.datetime)) else str(r['Data do Produto'])
-                selected_rows_list.append({
-                    "id": int(r['id']),
-                    "Data do Produto": d_str,
-                    "Tamanho Pixel (m)": int(r['Tamanho Pixel (m)']),
-                    "Satélite": str(r['Satélite']),
-                    "Grade MGRS": str(r['Grade MGRS']) if pd.notna(r['Grade MGRS']) else None,
-                    "zenital": float(r['zenital']) if pd.notna(r['zenital']) else None
-                })
-            
-            payload = {
-                "selected_rows": selected_rows_list,
-                "map_nome_id": map_nome_id
-            }
-            
-            # Cria a tarefa no banco
-            tarefa_id = criar_tarefa_background("CSV_INGEST", payload, len(selected_rows_list))
-            if tarefa_id:
-                st.session_state["tarefa_id_monitorada"] = tarefa_id
-                st.rerun()
+        # Inicializa o estado de confirmação se não existir
+        if 'confirmar_sobrescrever_pixels' not in st.session_state:
+            st.session_state['confirmar_sobrescrever_pixels'] = False
+            st.session_state['pixels_dados_conflito'] = []
+
+        if st.session_state['confirmar_sobrescrever_pixels']:
+            st.warning(f"Os produtos das seguintes datas já possuem pixels cadastrados no banco: {', '.join(st.session_state['pixels_dados_conflito'])}. Deseja sobrescrever os registros existentes?")
+            col_conf_spacer, col_conf_reset, col_conf_save = st.columns([6, 3, 3])
+            with col_conf_reset:
+                if st.button("Não, Cancelar Ingestão", type="secondary", use_container_width=True, key="btn_cancel_conf_pixels"):
+                    st.session_state['confirmar_sobrescrever_pixels'] = False
+                    st.session_state['pixels_dados_conflito'] = []
+                    st.rerun()
+            with col_conf_save:
+                if st.button("Sim, Sobrescrever Pixels", type="primary", use_container_width=True, key="btn_save_conf_pixels"):
+                    selected_rows_list = []
+                    for _, r in valid_selected.iterrows():
+                        d_str = r['Data do Produto'].strftime('%Y-%m-%d') if isinstance(r['Data do Produto'], (datetime.date, datetime.datetime)) else str(r['Data do Produto'])
+                        selected_rows_list.append({
+                            "id": int(r['id']),
+                            "Data do Produto": d_str,
+                            "Tamanho Pixel (m)": int(r['Tamanho Pixel (m)']),
+                            "Satélite": str(r['Satélite']),
+                            "Grade MGRS": str(r['Grade MGRS']) if pd.notna(r['Grade MGRS']) else None,
+                            "zenital": float(r['zenital']) if pd.notna(r['zenital']) else None
+                        })
+                    
+                    payload = {
+                        "selected_rows": selected_rows_list,
+                        "map_nome_id": map_nome_id
+                    }
+                    
+                    # Cria a tarefa no banco
+                    tarefa_id = criar_tarefa_background("CSV_INGEST", payload, len(selected_rows_list))
+                    if tarefa_id:
+                        st.session_state["tarefa_id_monitorada"] = tarefa_id
+                        st.session_state['confirmar_sobrescrever_pixels'] = False
+                        st.session_state['pixels_dados_conflito'] = []
+                        st.rerun()
+        else:
+            if btn_sinc and not valid_selected.empty:
+                # Verifica se há conflito (registros já importados no banco)
+                conflitos = valid_selected[valid_selected['Importado para o Banco'] == 'Salvo ✅']
+                if not conflitos.empty:
+                    conflito_dates = [c.strftime('%Y-%m-%d') if isinstance(c, (datetime.date, datetime.datetime)) else str(c) for c in conflitos['Data do Produto'].tolist()]
+                    st.session_state['confirmar_sobrescrever_pixels'] = True
+                    st.session_state['pixels_dados_conflito'] = conflito_dates
+                    st.rerun()
+                else:
+                    selected_rows_list = []
+                    for _, r in valid_selected.iterrows():
+                        d_str = r['Data do Produto'].strftime('%Y-%m-%d') if isinstance(r['Data do Produto'], (datetime.date, datetime.datetime)) else str(r['Data do Produto'])
+                        selected_rows_list.append({
+                            "id": int(r['id']),
+                            "Data do Produto": d_str,
+                            "Tamanho Pixel (m)": int(r['Tamanho Pixel (m)']),
+                            "Satélite": str(r['Satélite']),
+                            "Grade MGRS": str(r['Grade MGRS']) if pd.notna(r['Grade MGRS']) else None,
+                            "zenital": float(r['zenital']) if pd.notna(r['zenital']) else None
+                        })
+                    
+                    payload = {
+                        "selected_rows": selected_rows_list,
+                        "map_nome_id": map_nome_id
+                    }
+                    
+                    # Cria a tarefa no banco
+                    tarefa_id = criar_tarefa_background("CSV_INGEST", payload, len(selected_rows_list))
+                    if tarefa_id:
+                        st.session_state["tarefa_id_monitorada"] = tarefa_id
+                        st.rerun()
 
         if st.session_state.get("tarefa_id_monitorada"):
             processar_csv_modal(st.session_state["tarefa_id_monitorada"])

@@ -24,17 +24,38 @@ def inicializar_worker():
     """Inicializa a thread única do worker em segundo plano, se ainda não estiver ativa."""
     global _worker_thread
     with _worker_lock:
-        if _worker_thread is None or not _worker_thread.is_alive():
-            _stop_event.clear()
-            _worker_thread = threading.Thread(target=_worker_loop, daemon=True, name="SatellitumWorkerThread")
-            _worker_thread.start()
+        # Verifica se já existe uma thread ativa e saudável do worker
+        thread_ativa = False
+        for t in threading.enumerate():
+            if t.name == "SatellitumWorkerThread" and t.is_alive() and not getattr(t, 'stop_requested', False):
+                thread_ativa = True
+                break
+        
+        if thread_ativa:
+            # Já está rodando e saudável, não faz nada
+            return
+
+        # Sinaliza todas as threads antigas com o mesmo nome para pararem
+        for t in threading.enumerate():
+            if t.name == "SatellitumWorkerThread" and t.is_alive():
+                t.stop_requested = True
+                
+        _stop_event.clear()
+        _worker_thread = threading.Thread(target=_worker_loop, daemon=True, name="SatellitumWorkerThread")
+        _worker_thread.stop_requested = False
+        _worker_thread.start()
 
 def parar_worker():
     """Sinaliza para a thread do worker parar."""
     _stop_event.set()
+    if _worker_thread and _worker_thread.is_alive():
+        _worker_thread.stop_requested = True
 
 def _adicionar_log_db(tarefa_id: int, mensagem: str, incremental: bool = True):
     """Auxiliar para adicionar logs da execução no registro da tarefa no PostgreSQL."""
+    # Envia para o stdout para que o Docker logs capture em tempo real
+    print(f"[TAREFA #{tarefa_id}] {mensagem}", flush=True)
+    
     db = SessionLocal()
     try:
         tarefa = db.query(BackgroundTask).filter(BackgroundTask.id == tarefa_id).first()
@@ -48,7 +69,7 @@ def _adicionar_log_db(tarefa_id: int, mensagem: str, incremental: bool = True):
             db.commit()
     except Exception as e:
         db.rollback()
-        print(f"Erro ao salvar logs no banco: {e}")
+        print(f"Erro ao salvar logs no banco: {e}", flush=True)
     finally:
         db.close()
 
@@ -85,22 +106,26 @@ def _worker_loop():
     """Loop principal do worker executado em segundo plano."""
     print("[WORKER] Thread do Worker Satellitum iniciada com sucesso.")
     
+    current_thread = threading.current_thread()
+    
     # Ao iniciar, recupera tarefas presas em status 'processando' (ex: após restart de container)
-    # e as coloca de volta como 'pendente' para reprocessamento
-    db = SessionLocal()
-    try:
-        tarefas_presas = db.query(BackgroundTask).filter(BackgroundTask.status == "processando").all()
-        for t in tarefas_presas:
-            t.status = "pendente"
-            t.logs = (t.logs or "") + "[SISTEMA] Reinício detectado. Tarefa resetada para pendente.\n"
-        db.commit()
-    except Exception as e:
-        db.rollback()
-        print(f"[WORKER] Erro ao resetar tarefas presas no startup: {e}")
-    finally:
-        db.close()
+    # apenas se esta for a única thread de worker ativa (evita resetar tarefas de outras threads ativas)
+    outros_workers = [t for t in threading.enumerate() if t.name == "SatellitumWorkerThread" and t != current_thread and t.is_alive()]
+    if not outros_workers:
+        db = SessionLocal()
+        try:
+            tarefas_presas = db.query(BackgroundTask).filter(BackgroundTask.status == "processando").all()
+            for t in tarefas_presas:
+                t.status = "pendente"
+                t.logs = (t.logs or "") + "[SISTEMA] Reinício detectado. Tarefa resetada para pendente.\n"
+            db.commit()
+        except Exception as e:
+            db.rollback()
+            print(f"[WORKER] Erro ao resetar tarefas presas no startup: {e}")
+        finally:
+            db.close()
 
-    while not _stop_event.is_set():
+    while not _stop_event.is_set() and not getattr(current_thread, 'stop_requested', False):
         db = SessionLocal()
         tarefa = None
         try:
@@ -146,6 +171,7 @@ def _worker_loop():
 
 def _executar_gee_export(tarefa_id: int, payload: dict):
     """Executa o processamento do Earth Engine e exportação assíncrona para o Drive."""
+    current_thread = threading.current_thread()
     _adicionar_log_db(tarefa_id, "Inicializando o Google Earth Engine...")
     if not init_gee():
         _adicionar_log_db(tarefa_id, "[ERRO] Falha ao inicializar o Earth Engine. Abortando tarefa.")
@@ -194,6 +220,12 @@ def _executar_gee_export(tarefa_id: int, payload: dict):
         # 1. Verifica cancelamento
         if _verificar_cancelamento(tarefa_id):
             _adicionar_log_db(tarefa_id, "[CANCELADO] Processamento cancelado pelo usuário.")
+            return
+
+        # 1b. Verifica se a thread do worker foi solicitada a parar
+        if _stop_event.is_set() or getattr(current_thread, 'stop_requested', False):
+            _adicionar_log_db(tarefa_id, "[SISTEMA] Execução suspensa devido ao reinício da thread. A tarefa será retomada.")
+            _atualizar_progresso_db(tarefa_id, success_count, "pendente")
             return
 
         date_str = rdata.get('Data do Produto')
@@ -283,6 +315,12 @@ def _executar_gee_export(tarefa_id: int, payload: dict):
                         pass
                     _adicionar_log_db(tarefa_id, "[CANCELADO] Processamento cancelado pelo usuário.")
                     return
+                
+                # Verifica se a thread do worker foi solicitada a parar
+                if _stop_event.is_set() or getattr(current_thread, 'stop_requested', False):
+                    _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] Desligamento da thread detectado. Retornando tarefa ao status pendente...")
+                    _atualizar_progresso_db(tarefa_id, success_count, "pendente")
+                    return
                     
                 status = task.status()
                 state = status.get('state')
@@ -333,6 +371,16 @@ def _executar_csv_ingest(tarefa_id: int, payload: dict):
     fail_count = 0
     
     temp_dir = "/tmp/satellitum_temp"
+    # Limpa a pasta temporária de arquivos parciais de execuções anteriores abortadas
+    try:
+        if os.path.exists(temp_dir):
+            for filename in os.listdir(temp_dir):
+                file_path = os.path.join(temp_dir, filename)
+                if os.path.isfile(file_path):
+                    os.remove(file_path)
+    except Exception as e:
+        print(f"Erro ao limpar pasta temporária no início da ingestão: {e}")
+        
     os.makedirs(temp_dir, exist_ok=True)
     
     _adicionar_log_db(tarefa_id, f"Iniciando ingestão de {total} arquivo(s) CSV no PostgreSQL.")
@@ -343,16 +391,45 @@ def _executar_csv_ingest(tarefa_id: int, payload: dict):
             _adicionar_log_db(tarefa_id, "[CANCELADO] Processamento cancelado pelo usuário.")
             return
 
+        # 1b. Verifica se a thread do worker foi solicitada a parar
+        if _stop_event.is_set() or getattr(threading.current_thread(), 'stop_requested', False):
+            _adicionar_log_db(tarefa_id, "[SISTEMA] Execução suspensa devido ao reinício da thread. A tarefa será retomada.")
+            _atualizar_progresso_db(tarefa_id, success_count, "pendente")
+            return
+
         img_id = int(rdata.get('id'))
         date_str = rdata.get('Data do Produto')
         pixel_size = int(rdata.get('Tamanho Pixel (m)'))
         satelite = str(rdata.get('Satélite'))
         grade = rdata.get('Grade MGRS')
         zenital = rdata.get('zenital')
-        
         nome_esperado = f"CELMM_Data_{date_str}_{pixel_size}m.csv"
         dest_path = os.path.join(temp_dir, nome_esperado)
         
+        # Verifica se o produto tem 0 pixels válidos no banco de dados
+        pixels_validos_meta = None
+        db_sess = SessionLocal()
+        try:
+            from modules.models import MetadadosImagens
+            meta = db_sess.query(MetadadosImagens).filter(MetadadosImagens.id == img_id).first()
+            if meta:
+                pixels_validos_meta = meta.pixels_validos
+        except Exception as e:
+            print(f"Erro ao verificar pixels_validos_meta: {e}")
+        finally:
+            db_sess.close()
+
+        if pixels_validos_meta == 0:
+            _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] Produto com 0 pixels válidos. Ingestão vazia considerada sucesso.")
+            success_count += 1
+            _atualizar_progresso_db(tarefa_id, success_count)
+            try:
+                if os.path.exists(dest_path):
+                    os.remove(dest_path)
+            except:
+                pass
+            continue
+            
         _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] Preparando arquivo: `{nome_esperado}`")
         
         # A. Realiza download do GDrive se não estiver em disco local
@@ -377,7 +454,18 @@ def _executar_csv_ingest(tarefa_id: int, payload: dict):
         if os.path.exists(dest_path):
             _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] Lendo CSV e estruturando metadados na memória...")
             try:
-                df = pd.read_csv(dest_path)
+                try:
+                    df = pd.read_csv(dest_path)
+                except pd.errors.EmptyDataError:
+                    _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] Arquivo CSV vazio encontrado (0 pixels válidos). Ingestão concluída com sucesso.")
+                    try:
+                        os.remove(dest_path)
+                    except:
+                        pass
+                    success_count += 1
+                    _atualizar_progresso_db(tarefa_id, success_count)
+                    continue
+
                 rename_dict = {
                     'system:index': 'system_index',
                     '.geo': 'geo'
@@ -425,3 +513,12 @@ def _executar_csv_ingest(tarefa_id: int, payload: dict):
     
     final_status = "concluido" if fail_count == 0 else "falhou"
     _atualizar_progresso_db(tarefa_id, success_count, final_status)
+
+
+if __name__ == "__main__":
+    print("[WORKER] Iniciando worker em modo standalone...")
+    try:
+        _worker_loop()
+    except KeyboardInterrupt:
+        print("[WORKER] Interrupção detectada. Encerrando worker...")
+        parar_worker()

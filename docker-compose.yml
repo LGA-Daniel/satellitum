@@ -36,6 +36,26 @@ services:
     networks:
       - satellitum_network
 
+  satellitum_worker:
+    build: .
+    container_name: satellitum_worker
+    restart: always
+    entrypoint: ["python3", "-m", "modules.worker"]
+    volumes:
+      - .:/app  
+      - ~/.config/earthengine:/root/.config/earthengine
+      - /storage/datasets:/data/datasets
+    environment:
+      - DB_HOST=satellitum_db
+      - DB_NAME=satellitum
+      - DB_USER=administrador
+      - DB_PASS=202606
+      - EARTHENGINE_PROJECT=ppgrhs
+    depends_on:
+      - satellitum_db
+    networks:
+      - satellitum_network
+
   satellitum_pgadmin:
     image: dpage/pgadmin4
     container_name: satellitum_pgadmin

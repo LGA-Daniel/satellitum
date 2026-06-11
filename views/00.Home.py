@@ -10,4 +10,4 @@ st.divider()
 
 st.caption("Centro de Tecnologia")
 st.caption("Programa de Pós-Graduação em Recursos Hídricos e Saneamento")
-st.caption("Versão: Beta.01.06-2026")
+st.caption("Versão: Dev.02.06-2026")

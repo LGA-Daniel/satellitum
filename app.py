@@ -1,6 +1,4 @@
 import streamlit as st
-from modules.worker import inicializar_worker
-inicializar_worker()
 
 
 # Injeta CSS global da aplicação
@@ -32,7 +30,6 @@ st.html("""
 paginas = st.navigation([
     st.Page("views/00.Home.py", title="Satellitum"),
         
-    st.Page("views/01.CELMM_PROCESSAR_METADADOS.py", title="CELMM - Buscar Produtos"),
     st.Page("views/02.CELMM_VISUALIZAR_METADADOS.py", title="CELMM - Explorar Metadados"),
     st.Page("views/03.CELMM_BAIXAR_IMAGENS.py", title="CELMM - Processar Produtos (CSV | GDRIVE)"),
     st.Page("views/04.CELMM_ARQUIVOS_DRIVE.py", title="CELMM - Sincronizar Produtos"),

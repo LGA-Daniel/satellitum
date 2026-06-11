@@ -24,7 +24,7 @@ def exportar_conteudo_modal(ids_imagens, tipo_formato):
         elapsed_placeholder.markdown(f"**Tempo decorrido:** {cache['elapsed']}s | **Total carregado:** {cache['total_rows']:,} linhas")
         st.success(f"Arquivo com {cache['total_rows']:,} pixels recuperado do cache com sucesso!")
         st.download_button(
-            label=f"Clique aqui para Baixar {tipo_formato.upper()}",
+            label=f"Baixar {tipo_formato.upper()}",
             data=cache["file_data"],
             file_name=f"CELMM_Export_{datetime.date.today()}.{cache['file_ext']}",
             mime=cache["mime_type"],
@@ -91,7 +91,7 @@ def exportar_conteudo_modal(ids_imagens, tipo_formato):
             excel_buffer.seek(0)
             file_data = excel_buffer.getvalue()
         except ImportError:
-            st.error("⚠️ Erro: Suporte a Excel indisponível. Reconstrua a stack Docker (`docker compose up --build -d`).")
+            st.error("Erro: Suporte a Excel indisponível. Reconstrua a stack Docker (`docker compose up --build -d`).")
             st.stop()
         mime_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         file_ext = "xlsx"
@@ -120,10 +120,10 @@ def exportar_conteudo_modal(ids_imagens, tipo_formato):
     )
 
 if hasattr(st, "dialog"):
-    modal_exportar = st.dialog("Preparando Exportação de Dados ⚙️")(exportar_conteudo_modal)
+    modal_exportar = st.dialog("Preparando Exportação de Dados")(exportar_conteudo_modal)
 else:
     def modal_exportar(ids_imagens, tipo_formato):
-        with st.expander("Preparando Exportação de Dados ⚙️", expanded=True):
+        with st.expander("Preparando Exportação de Dados", expanded=True):
             exportar_conteudo_modal(ids_imagens, tipo_formato)
 
 st.set_page_config(page_title="CELMM | Visualizar e Exportar Dados", page_icon="🛰️", layout="wide")
@@ -217,6 +217,44 @@ else:
     if df_filtrado.empty:
         st.warning("Nenhum dado encontrado para os filtros selecionados.")
     else:
+        # Seção de Estatísticas (Cards)
+        total_importados = len(df)
+        filtrados_count = len(df_filtrado)
+        total_pixels_est = int(df_filtrado['pixels_validos'].sum())
+        
+        st.text("")
+        col_c1, col_c2, col_c3 = st.columns(3)
+        
+        def card_destacado(label, value, title_tooltip=None):
+            tooltip_attr = f'title="{title_tooltip}"' if title_tooltip else ""
+            return f"""
+                <div style="
+                    background-color: rgba(2, 132, 199, 0.08); 
+                    border: 1px solid rgba(2, 132, 199, 0.25); 
+                    border-radius: 8px; 
+                    padding: 12px 15px; 
+                    display: flex;
+                    flex-direction: column;
+                    align-items: center;
+                    justify-content: center;
+                    text-align: center;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+                    margin-bottom: 15px;
+                    width: 100%;
+                " {tooltip_attr}>
+                    <p style="margin: 0; font-size: 0.85em; font-weight: 500; color: var(--text-color); opacity: 0.8; text-align: center; width: 100%;">{label}</p>
+                    <div style="margin: 4px 0 0 0; font-size: 1.6em; color: var(--primary-color); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; width: 100%;">{value}</div>
+                </div>
+            """
+            
+        with col_c1:
+            st.markdown(card_destacado("Produtos Disponíveis", str(total_importados)), unsafe_allow_html=True)
+        with col_c2:
+            st.markdown(card_destacado("&nbsp;", "&nbsp;"), unsafe_allow_html=True)
+        with col_c3:
+            st.markdown(card_destacado("&nbsp;", "&nbsp;"), unsafe_allow_html=True)
+        st.text("")
+
         # Checkbox para marcar todas por padrão
         selecionar_padrao = st.checkbox("Marcar todos", value=False)
         

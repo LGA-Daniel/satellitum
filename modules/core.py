@@ -17,8 +17,14 @@ DB_PASS = os.getenv("DB_PASS", "202606")
 
 DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASS}@{DB_HOST}:5432/{DB_NAME}"
 
-# Criação do Engine do SQLAlchemy
-engine = create_engine(DATABASE_URL)
+# Criação do Engine do SQLAlchemy com gerenciamento robusto do pool de conexões
+engine = create_engine(
+    DATABASE_URL,
+    pool_size=10,
+    max_overflow=20,
+    pool_recycle=1800,
+    pool_pre_ping=True
+)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def get_db():
@@ -74,6 +80,35 @@ def salvar_metadados(lista_dados: list, tamanho_pixel: int) -> bool:
         db.rollback()
         st.error(f"Erro ao salvar metadados no banco: {e}")
         return False
+    finally:
+        db.close()
+
+def verificar_metadados_existentes(lista_dados: list, tamanho_pixel: int) -> list:
+    """Verifica quais datas da lista de metadados já estão cadastradas no banco."""
+    db = SessionLocal()
+    try:
+        datas_conflito = []
+        for item in lista_dados:
+            data_val = str(item.get('Data'))
+            satelite_val = str(item.get('Satelite'))
+            mgrs_val = str(item.get('Z_Grade_MGRS')) if item.get('Z_Grade_MGRS') is not None else None
+            
+            query = db.query(MetadadosImagens).filter(
+                MetadadosImagens.data == data_val,
+                MetadadosImagens.satelite == satelite_val,
+                MetadadosImagens.tamanho_pixel == int(tamanho_pixel)
+            )
+            if mgrs_val is not None:
+                query = query.filter(MetadadosImagens.z_grade_mgrs == mgrs_val)
+            else:
+                query = query.filter(MetadadosImagens.z_grade_mgrs.is_(None))
+                
+            if query.first() is not None:
+                datas_conflito.append(data_val)
+        return sorted(list(set(datas_conflito)))
+    except Exception as e:
+        st.error(f"Erro ao verificar metadados no banco: {e}")
+        return []
     finally:
         db.close()
 
