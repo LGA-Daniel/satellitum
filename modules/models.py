@@ -125,3 +125,30 @@ class CelmmPixels(Base):
             "geo": self.geo,
             "data_registro": self.data_registro.isoformat() if self.data_registro else None
         }
+
+class BackgroundTask(Base):
+    __tablename__ = "background_tasks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tipo_tarefa: Mapped[str] = mapped_column(String(100), nullable=False) # 'GEE_EXPORT' ou 'CSV_INGEST'
+    status: Mapped[str] = mapped_column(String(50), nullable=False, default="pendente") # pendente, processando, concluido, falhou, cancelado
+    total_itens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    itens_processados: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    logs: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    payload: Mapped[Optional[str]] = mapped_column(Text, nullable=True) # JSON contendo parâmetros
+    criado_em: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    atualizado_em: Mapped[datetime] = mapped_column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    def to_dict(self) -> dict:
+        return {
+            "id": self.id,
+            "tipo_tarefa": self.tipo_tarefa,
+            "status": self.status,
+            "total_itens": self.total_itens,
+            "itens_processados": self.itens_processados,
+            "logs": self.logs,
+            "payload": self.payload,
+            "criado_em": self.criado_em.isoformat() if self.criado_em else None,
+            "atualizado_em": self.atualizado_em.isoformat() if self.atualizado_em else None
+        }
+

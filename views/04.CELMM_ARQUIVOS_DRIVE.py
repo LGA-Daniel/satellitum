@@ -3,7 +3,17 @@ import pandas as pd
 import datetime
 import os
 import shutil
-from modules.core import obter_metadados_salvos, listar_arquivos_pasta_drive, baixar_arquivo_drive_para_disco, salvar_pixels_bulk, obter_ids_imagens_com_pixels
+from modules.core import (
+    obter_metadados_salvos, 
+    listar_arquivos_pasta_drive, 
+    baixar_arquivo_drive_para_disco, 
+    salvar_pixels_bulk, 
+    obter_ids_imagens_com_pixels,
+    criar_tarefa_background,
+    obter_tarefa_ativa,
+    obter_status_tarefa,
+    cancelar_tarefa
+)
 
 st.set_page_config(page_title="CELMM | Sincronizar Produtos", page_icon="🛰️", layout="wide")
 
@@ -109,126 +119,77 @@ else:
             baixar_arquivos_conteudo(valid_selected, map_nome_id)
 
 # Função contendo a lógica de processamento do CSV para o banco
-def processar_csv_conteudo(valid_selected, map_nome_id):
-    if st.session_state.get("executar_processamento"):
-        # Impede reexecuções em reruns subsequentes
-        st.session_state["executar_processamento"] = False
-        
-        import time
-        logs = []
-        st.write(f"Iniciando o processamento de **{len(valid_selected)}** arquivo(s) disponível(is).")
-        progresso_geral = st.progress(0.0, text="Progresso Geral: 0%")
-        status_geral = st.empty()
-        
-        for i, (idx, row) in enumerate(valid_selected.iterrows()):
-            img_id = int(row['id'])
-            date_str = row["Data do Produto"].strftime('%Y-%m-%d') if isinstance(row["Data do Produto"], (datetime.date, datetime.datetime)) else str(row["Data do Produto"])
-            pixel_size = int(row['Tamanho Pixel (m)'])
-            satelite = str(row['Satélite'])
-            grade = str(row['Grade MGRS']) if pd.notna(row['Grade MGRS']) else None
-            zenital = float(row['zenital']) if pd.notna(row['zenital']) else None
-            
-            nome_esperado = f"CELMM_Data_{date_str}_{pixel_size}m.csv"
-            dest_path = os.path.join(temp_dir, nome_esperado)
-            
-            status_geral.info(f"**Produto {i+1} de {len(valid_selected)}:** `{nome_esperado}`")
-            
-            # Progress bar para as etapas deste produto
-            barra_etapas = st.progress(0.0, text="Iniciando processamento do produto...")
-            
-            # 1. Download se necessário
-            if not os.path.exists(dest_path):
-                fid = map_nome_id.get(nome_esperado)
-                if not fid:
-                    logs.append(f"❌ Produto {date_str} ({pixel_size}m): Arquivo não encontrado no Google Drive.")
-                    barra_etapas.empty()
-                    continue
-                barra_etapas.progress(0.1, text="Etapa 1/5: Baixando arquivo do Google Drive...")
-                try:
-                    baixar_arquivo_drive_para_disco(fid, dest_path)
-                except Exception as e:
-                    logs.append(f"❌ Produto {date_str} ({pixel_size}m): Erro ao baixar: {e}")
-                    barra_etapas.empty()
-                    continue
-            
-            # 2. Leitura e Ingestão via COPY
-            if os.path.exists(dest_path):
-                try:
-                    # Passo A: Ler CSV completo
-                    barra_etapas.progress(0.3, text="Etapa 2/5: Carregando arquivo CSV na memória...")
-                    df = pd.read_csv(dest_path)
-                    
-                    # Passo B: Limpeza e formatação de colunas
-                    barra_etapas.progress(0.5, text="Etapa 3/5: Realizando limpeza de dados e injeção de metadados...")
-                    rename_dict = {
-                        'system:index': 'system_index',
-                        '.geo': 'geo'
-                    }
-                    df = df.rename(columns=rename_dict)
-                    
-                    df['metadados_imagem_id'] = img_id
-                    df['data'] = date_str
-                    df['satelite'] = satelite
-                    df['z_grade_mgrs'] = grade
-                    df['tamanho_pixel'] = pixel_size
-                    df['zenital'] = zenital
-                    
-                    # Converte system_index de forma segura para string sem .0
-                    def converter_system_index(val):
-                        if pd.isna(val):
-                            return ""
-                        if isinstance(val, float):
-                            if val.is_integer():
-                                return str(int(val))
-                            return str(val)
-                        return str(val)
-                    df['system_index'] = df['system_index'].apply(converter_system_index)
-                    
-                    # Passo C: Executar o COPY via core.py
-                    barra_etapas.progress(0.7, text="Etapa 4/5: Transmitindo dados via COPY e resolvendo conflitos...")
-                    inseridos = salvar_pixels_bulk(df)
-                    logs.append(f"✅ Produto {date_str} ({pixel_size}m): {inseridos:,} pixels importados com sucesso.")
-                    
-                    # Passo D: Limpeza local
-                    barra_etapas.progress(1.0, text="Etapa 5/5: Finalizando e limpando arquivos temporários locais...")
-                    try:
-                        os.remove(dest_path)
-                    except Exception:
-                        pass
-                        
-                    st.success(f"Sucesso: {inseridos:,} pixels importados/atualizados para `{nome_esperado}`!")
-                    
-                except Exception as e:
-                    logs.append(f"❌ Produto {date_str} ({pixel_size}m): Erro no processamento: {e}")
-                
-                # Aguarda meio segundo para exibição visual do estado de conclusão da etapa antes de limpar
-                time.sleep(0.5)
-                barra_etapas.empty()
-                    
-            progresso_geral.progress((i + 1) / len(valid_selected), text=f"Progresso Geral: {int((i + 1) / len(valid_selected) * 100)}%")
-            
-        st.session_state["logs_processamento"] = logs
-        st.session_state["processamento_concluido"] = True
+# Função contendo a lógica de processamento do CSV para o banco (monitorada via fila)
+def processar_csv_conteudo(tarefa_id):
+    import time
+    t = obter_status_tarefa(tarefa_id)
+    if not t:
+        st.error("Tarefa não encontrada.")
+        if st.button("Fechar", type="primary", use_container_width=True):
+            if "tarefa_id_monitorada" in st.session_state:
+                del st.session_state["tarefa_id_monitorada"]
+            st.rerun()
+        return
+
+    status = t["status"]
+    processados = t["itens_processados"]
+    total = t["total_itens"]
+    logs = t["logs"] or ""
+
+    # Exibe título e progresso
+    if status == "pendente":
+        st.info("Tarefa aguardando na fila de execução...")
+        st.progress(0.0)
+    elif status == "processando":
+        pct = processados / total if total > 0 else 0.0
+        st.progress(pct, text=f"Processando CSVs: {processados}/{total} arquivos ({int(pct*100)}%)")
+    elif status == "concluido":
+        st.success("Sincronização concluída com sucesso! 🎉")
+        st.progress(1.0)
+    elif status == "cancelado":
+        st.warning("Processamento cancelado pelo usuário.")
+        st.progress(processados / total if total > 0 else 0.0)
+    else:
+        st.error("A sincronização falhou.")
+        st.progress(processados / total if total > 0 else 0.0)
+
+    st.subheader("Logs de Ingestão")
+    st.code(logs)
+
+    # Botões de ação baseados no status
+    if status in ["pendente", "processando"]:
+        if st.button("Cancelar Processamento", type="secondary", use_container_width=True):
+            cancelar_tarefa(tarefa_id)
+            st.toast("Cancelamento solicitado.")
+            st.rerun()
+        # Atualização automática da modal
+        time.sleep(2)
         st.rerun()
+    else:
+        col_c1, col_c2 = st.columns(2)
+        with col_c1:
+            st.download_button(
+                label="Baixar Logs (.txt)",
+                data=logs,
+                file_name=f"log_ingestao_tarefa_{tarefa_id}_{datetime.date.today()}.txt",
+                mime="text/plain",
+                use_container_width=True
+            )
+        with col_c2:
+            if st.button("Fechar", type="primary", use_container_width=True):
+                if "tarefa_id_monitorada" in st.session_state:
+                    del st.session_state["tarefa_id_monitorada"]
+                st.rerun()
 
-    # Tela final pós-processamento (estável e sem reexecução)
-    if st.session_state.get("processamento_concluido"):
-        st.subheader("Processamento Concluído! 📋")
-        for log in st.session_state.get("logs_processamento", []):
-            if "✅" in log:
-                st.success(log)
-            else:
-                st.error(log)
-                
-
-
-# Definição dinâmica do modal de processamento para suportar retrocompatibilidade do Streamlit
 if hasattr(st, "dialog"):
-    processar_csv_modal = st.dialog("Processar CSV para a Base de Dados ⚙️")(processar_csv_conteudo)
+    @st.dialog("Processar CSV para a Base de Dados ⚙️")
+    def processar_csv_modal(tid):
+        processar_csv_conteudo(tid)
 else:
-    def processar_csv_modal(valid_selected, map_nome_id):
+    def processar_csv_modal(tid):
         with st.expander("Processamento de CSV ⚙️", expanded=True):
-            processar_csv_conteudo(valid_selected, map_nome_id)
+            processar_csv_conteudo(tid)
+
 
 
 if not dados:
@@ -400,6 +361,12 @@ else:
 
         st.divider()
 
+        # Verifica se já existe uma tarefa ativa rodando no banco ao carregar a página
+        if "tarefa_id_monitorada" not in st.session_state:
+            tarefa_ativa = obter_tarefa_ativa()
+            if tarefa_ativa and tarefa_ativa["tipo_tarefa"] == "CSV_INGEST":
+                st.session_state["tarefa_id_monitorada"] = tarefa_ativa["id"]
+
         # Seleciona os registros marcados
         selected_rows = edited_df[edited_df["Selecionar"] == True]
         
@@ -410,12 +377,15 @@ else:
         
         with col_process_db:
             if not valid_selected.empty:
-                if st.button("Sincronizar com o Banco de Dados", type="secondary", use_container_width=True, key="btn_sincronizar_ativos"):
-                    st.session_state["executar_processamento"] = True
-                    st.session_state["processamento_concluido"] = False
-                    st.session_state["logs_processamento"] = []
-                    st.rerun()
+                btn_sinc = st.button(
+                    "Sincronizar com o Banco de Dados", 
+                    type="secondary", 
+                    use_container_width=True, 
+                    key="btn_sincronizar_ativos",
+                    disabled=st.session_state.get("tarefa_id_monitorada") is not None
+                )
             else:
+                btn_sinc = False
                 st.button(
                     "Sincronizar com o Banco de Dados", 
                     type="secondary", 
@@ -438,7 +408,32 @@ else:
                     help="Marque pelo menos um produto com status 'Disponível ✅'.",
                     key="btn_baixar_inativos"
                 )
-                
-        # Renderiza o modal condicionalmente de acordo com o estado do session_state
-        if st.session_state.get("executar_processamento") or st.session_state.get("processamento_concluido"):
-            processar_csv_modal(valid_selected, map_nome_id)
+
+        if btn_sinc and not valid_selected.empty:
+            # Prepara o payload para a fila
+            selected_rows_list = []
+            for _, r in valid_selected.iterrows():
+                d_str = r['Data do Produto'].strftime('%Y-%m-%d') if isinstance(r['Data do Produto'], (datetime.date, datetime.datetime)) else str(r['Data do Produto'])
+                selected_rows_list.append({
+                    "id": int(r['id']),
+                    "Data do Produto": d_str,
+                    "Tamanho Pixel (m)": int(r['Tamanho Pixel (m)']),
+                    "Satélite": str(r['Satélite']),
+                    "Grade MGRS": str(r['Grade MGRS']) if pd.notna(r['Grade MGRS']) else None,
+                    "zenital": float(r['zenital']) if pd.notna(r['zenital']) else None
+                })
+            
+            payload = {
+                "selected_rows": selected_rows_list,
+                "map_nome_id": map_nome_id
+            }
+            
+            # Cria a tarefa no banco
+            tarefa_id = criar_tarefa_background("CSV_INGEST", payload, len(selected_rows_list))
+            if tarefa_id:
+                st.session_state["tarefa_id_monitorada"] = tarefa_id
+                st.rerun()
+
+        if st.session_state.get("tarefa_id_monitorada"):
+            processar_csv_modal(st.session_state["tarefa_id_monitorada"])
+

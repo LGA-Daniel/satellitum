@@ -1,11 +1,13 @@
 import ee
 import os
+from typing import Optional
+
 import streamlit as st
 import pandas as pd
 from sqlalchemy import create_engine, func
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.dialects.postgresql import insert
-from modules.models import HistoricoExecucao, MetadadosImagens, CelmmPixels
+from modules.models import HistoricoExecucao, MetadadosImagens, CelmmPixels, BackgroundTask
 
 # Configurações do Banco de Dados
 DB_HOST = os.getenv("DB_HOST", "satellitum_db")
@@ -386,5 +388,84 @@ def obter_df_pixels_por_imagem_ids_generator(imagem_ids: list, chunksize: int = 
             yield chunk
     except Exception as e:
         st.error(f"Erro ao buscar pixels do banco de dados em lotes: {e}")
+    finally:
+        db.close()
+
+def criar_tarefa_background(tipo_tarefa: str, payload_dict: dict, total_itens: int) -> int:
+    """Cria uma nova tarefa de background e a insere no banco com status 'pendente'."""
+    import json
+    db = SessionLocal()
+    try:
+        tarefa = BackgroundTask(
+            tipo_tarefa=tipo_tarefa,
+            status="pendente",
+            total_itens=total_itens,
+            itens_processados=0,
+            payload=json.dumps(payload_dict),
+            logs=f"Tarefa criada. Tipo: {tipo_tarefa} | Itens a processar: {total_itens}\n"
+        )
+        db.add(tarefa)
+        db.commit()
+        db.refresh(tarefa)
+        return tarefa.id
+    except Exception as e:
+        db.rollback()
+        st.error(f"Erro ao criar tarefa de background: {e}")
+        return None
+    finally:
+        db.close()
+
+def obter_tarefa_ativa() -> Optional[dict]:
+    """Retorna a tarefa de background ativa (em andamento ou pendente), se houver."""
+    db = SessionLocal()
+    try:
+        # Busca primeiro 'processando', depois 'pendente'
+        tarefa = db.query(BackgroundTask).filter(BackgroundTask.status == "processando").first()
+        if not tarefa:
+            tarefa = db.query(BackgroundTask).filter(BackgroundTask.status == "pendente").order_by(BackgroundTask.id.asc()).first()
+        
+        return tarefa.to_dict() if tarefa else None
+    except Exception as e:
+        st.error(f"Erro ao buscar tarefa ativa: {e}")
+        return None
+    finally:
+        db.close()
+
+def cancelar_tarefa(tarefa_id: int):
+    """Marca uma tarefa específica como cancelada no banco de dados."""
+    db = SessionLocal()
+    try:
+        tarefa = db.query(BackgroundTask).filter(BackgroundTask.id == tarefa_id).first()
+        if tarefa:
+            tarefa.status = "cancelado"
+            tarefa.logs = (tarefa.logs or "") + "[SISTEMA] Solicitação de cancelamento recebida.\n"
+            db.commit()
+    except Exception as e:
+        db.rollback()
+        st.error(f"Erro ao cancelar tarefa: {e}")
+    finally:
+        db.close()
+
+def obter_status_tarefa(tarefa_id: int) -> Optional[dict]:
+    """Retorna o status atual de uma tarefa específica."""
+    db = SessionLocal()
+    try:
+        tarefa = db.query(BackgroundTask).filter(BackgroundTask.id == tarefa_id).first()
+        return tarefa.to_dict() if tarefa else None
+    except Exception as e:
+        st.error(f"Erro ao obter status da tarefa: {e}")
+        return None
+    finally:
+        db.close()
+
+def obter_historico_tarefas(limit: int = 10) -> list:
+    """Retorna o histórico de tarefas recentes executadas ou em execução."""
+    db = SessionLocal()
+    try:
+        tarefas = db.query(BackgroundTask).order_by(BackgroundTask.id.desc()).limit(limit).all()
+        return [t.to_dict() for t in tarefas]
+    except Exception as e:
+        st.error(f"Erro ao buscar histórico de tarefas: {e}")
+        return []
     finally:
         db.close()

@@ -1,4 +1,7 @@
 import streamlit as st
+from modules.worker import inicializar_worker
+inicializar_worker()
+
 
 # Injeta CSS global da aplicação
 st.html("""

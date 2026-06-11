@@ -3,7 +3,14 @@ import pandas as pd
 import datetime
 import time
 import ee
-from modules.core import init_gee, obter_metadados_salvos
+from modules.core import (
+    init_gee, 
+    obter_metadados_salvos, 
+    criar_tarefa_background, 
+    obter_tarefa_ativa, 
+    obter_status_tarefa, 
+    cancelar_tarefa
+)
 
 # Inicializa o contador de reset de filtros se não existir
 if 'reset_counter' not in st.session_state:
@@ -225,167 +232,71 @@ else:
                 final_image = select_image.clip(ROI)
             return final_image
 
-        def processar_gee_conteudo(selected_rows_data, df_filtrado_data):
-            if st.session_state.get("executar_processamento_gee") and not st.session_state.get("processamento_gee_concluido"):
-                st.write(f"Processando {len(selected_rows_data)} produtos no Google Earth Engine...")
-                progresso_geral = st.progress(0.0, text="Iniciando...")
-                log_placeholder = st.empty()
-                
-                st.session_state['logs_execucao'] = ""
-                
-                def append_log(message):
-                    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    st.session_state['logs_execucao'] += f"[{timestamp}] {message}\n"
-                    log_placeholder.code(st.session_state['logs_execucao'])
-
-                append_log(f"Iniciando fila de processamento para {len(selected_rows_data)} produtos...")
-                
-                try:
-                    ROI = ee.FeatureCollection("projects/ppgrhs/assets/CELMM_2025_AJUSTADO")
-                except Exception as e:
-                    append_log(f"[ERRO] Falha ao carregar a ROI CELMM no GEE: {e}")
-                    st.session_state["processamento_gee_concluido"] = True
-                    st.session_state["executar_processamento_gee"] = False
+        def processar_gee_conteudo(tarefa_id):
+            t = obter_status_tarefa(tarefa_id)
+            if not t:
+                st.error("Tarefa não encontrada.")
+                if st.button("Fechar", type="primary", use_container_width=True):
+                    if "tarefa_id_monitorada" in st.session_state:
+                        del st.session_state["tarefa_id_monitorada"]
                     st.rerun()
-                    
-                success_count = 0
-                fail_count = 0
-                total = len(selected_rows_data)
-                
-                for index, rdata in enumerate(selected_rows_data.to_dict('records')):
-                    pct = index / total
-                    progresso_geral.progress(pct, text=f"Progresso Geral: {index}/{total} produtos ({int(pct*100)}%)")
-                    
-                    match = df_filtrado_data[
-                        (df_filtrado_data['data'] == rdata['Data do Produto']) &
-                        (df_filtrado_data['satelite'] == rdata['Satélite'])
-                    ]
-                    
-                    if match.empty:
-                        append_log(f"[ERRO] [{index + 1}/{total}] Não foi possível recuperar os metadados do produto de {rdata['Data do Produto']}.")
-                        fail_count += 1
-                        continue
-                        
-                    row_data = match.iloc[0]
-                    date_obj = row_data['data']
-                    date_str = date_obj.strftime('%Y-%m-%d')
-                    sat = row_data['satelite']
-                    grade = row_data['z_grade_mgrs']
-                    pixel_sz = int(row_data['tamanho_pixel'])
-                    
-                    append_log(f"[{index + 1}/{total}] Processando data: {date_str} | Satélite: {sat} | Grade: {grade} | Pixel: {pixel_sz}m")
-                    
-                    try:
-                        str_start = date_str
-                        str_end = (date_obj + datetime.timedelta(days=1)).strftime('%Y-%m-%d')
-                        
-                        collection = (ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
-                                      .filterBounds(ROI)
-                                      .filterDate(str_start, str_end)
-                                      .filter(ee.Filter.eq('MGRS_TILE', grade))
-                                      .filter(ee.Filter.eq('SPACECRAFT_NAME', sat)))
-                        
-                        size = collection.size().getInfo()
-                        if size == 0:
-                            append_log(f"[ERRO] [{index + 1}/{total}] Nenhum produto correspondente encontrado no Earth Engine.")
-                            fail_count += 1
-                            continue
-                            
-                        image = collection.first()
-                        CRS_base = image.select('B4').projection()
-                        
-                        img_with_SCL = preprocess_1(image)
-                        bands = ['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B8A', 'B9', 'B11', 'B12']
-                        final_img = preprocess_2(img_with_SCL, bands, CRS_base, pixel_sz, ROI)
-                        
-                        image_for_extraction = final_img.addBands(ee.Image.pixelLonLat())
-                        final_CRS = CRS_base.atScale(pixel_sz) if pixel_sz > 10 else CRS_base
-                        
-                        extracted_points = image_for_extraction.sample(
-                            region=ROI,
-                            scale=pixel_sz,
-                            projection=final_CRS,
-                            geometries=False,
-                            tileScale=4
-                        )
-                        
-                        task_desc = f"Exportar_CSV_{date_str}_{pixel_sz}m"
-                        file_prefix = f"CELMM_Data_{date_str}_{pixel_sz}m"
-                        
-                        task = ee.batch.Export.table.toDrive(
-                            collection=extracted_points,
-                            description=task_desc,
-                            folder='CSV_Sentinel2',
-                            fileNamePrefix=file_prefix,
-                            fileFormat='CSV'
-                        )
-                        
-                        append_log(f"[{index + 1}/{total}] Submetendo tarefa ao GEE...")
-                        task.start()
-                        task_id = task.status().get('id')
-                        append_log(f"[{index + 1}/{total}] Tarefa iniciada no GEE. ID: {task_id}")
-                        
-                        start_time = time.time()
-                        last_state = None
-                        
-                        while True:
-                            status = task.status()
-                            state = status.get('state')
-                            elapsed = int(time.time() - start_time)
-                            
-                            if state != last_state:
-                                append_log(f"[{index + 1}/{total}] Status: {state} ({elapsed}s decorridos)")
-                                last_state = state
-                                
-                            if state in ['COMPLETED', 'FAILED', 'CANCELLED']:
-                                if state == 'COMPLETED':
-                                    append_log(f"[{index + 1}/{total}] Sucesso! Exportação concluída em {elapsed}s.")
-                                    success_count += 1
-                                else:
-                                    err_msg = status.get('error_message', 'Sem detalhes de erro.')
-                                    append_log(f"[ERRO] [{index + 1}/{total}] Tarefa falhou/cancelou. Erro: {err_msg}")
-                                    fail_count += 1
-                                break
-                                
-                            time.sleep(5)
-                            
-                    except Exception as e:
-                        append_log(f"[ERRO] [{index + 1}/{total}] Erro durante processamento: {e}")
-                        fail_count += 1
-                        
-                append_log("--------------------------------------------------")
-                append_log(f"Processamento concluído! Sucesso: {success_count} | Falhas: {fail_count}")
-                st.session_state["processamento_gee_concluido"] = True
-                st.session_state["executar_processamento_gee"] = False
-                st.rerun()
+                return
 
-            if st.session_state.get("processamento_gee_concluido"):
-                st.subheader("Processamento Concluído! 📋")
-                st.progress(1.0, text="Todos os produtos processados (100%)")
-                st.subheader("Logs de Execução")
-                st.code(st.session_state.get('logs_execucao', ""))
-                
-                col_l1, col_l2 = st.columns(2)
-                with col_l1:
+            status = t["status"]
+            processados = t["itens_processados"]
+            total = t["total_itens"]
+            logs = t["logs"] or ""
+
+            # Exibe título e progresso
+            if status == "pendente":
+                st.info("Tarefa aguardando na fila de execução...")
+                st.progress(0.0)
+            elif status == "processando":
+                pct = processados / total if total > 0 else 0.0
+                st.progress(pct, text=f"Processando: {processados}/{total} produtos ({int(pct*100)}%)")
+            elif status == "concluido":
+                st.success("Processamento concluído com sucesso! 🎉")
+                st.progress(1.0)
+            elif status == "cancelado":
+                st.warning("Processamento cancelado pelo usuário.")
+                st.progress(processados / total if total > 0 else 0.0)
+            else:
+                st.error("O processamento falhou.")
+                st.progress(processados / total if total > 0 else 0.0)
+
+            st.subheader("Logs de Execução")
+            st.code(logs)
+
+            # Botões de ação baseados no status
+            if status in ["pendente", "processando"]:
+                if st.button("Cancelar Processamento", type="secondary", use_container_width=True):
+                    cancelar_tarefa(tarefa_id)
+                    st.toast("Cancelamento solicitado.")
+                    st.rerun()
+                # Atualização automática da modal
+                time.sleep(2)
+                st.rerun()
+            else:
+                col_c1, col_c2 = st.columns(2)
+                with col_c1:
                     st.download_button(
                         label="Baixar Logs (.txt)",
-                        data=st.session_state.get('logs_execucao', ""),
-                        file_name=f"log_processamento_{datetime.date.today()}.txt",
+                        data=logs,
+                        file_name=f"log_gee_tarefa_{tarefa_id}_{datetime.date.today()}.txt",
                         mime="text/plain",
                         use_container_width=True
                     )
-                with col_l2:
+                with col_c2:
                     if st.button("Fechar", type="primary", use_container_width=True):
-                        st.session_state["processamento_gee_concluido"] = False
-                        st.session_state["executar_processamento_gee"] = False
+                        if "tarefa_id_monitorada" in st.session_state:
+                            del st.session_state["tarefa_id_monitorada"]
                         st.rerun()
 
-        if hasattr(st, "dialog"):
-            processar_gee_modal = st.dialog("Processando no GEE ⚙️")(processar_gee_conteudo)
-        else:
-            def processar_gee_modal(selected_rows_data, df_filtrado_data):
-                with st.expander("Processando no GEE ⚙️", expanded=True):
-                    processar_gee_conteudo(selected_rows_data, df_filtrado_data)
+        # Verifica se já existe uma tarefa ativa rodando no banco ao carregar a página
+        if "tarefa_id_monitorada" not in st.session_state:
+            tarefa_ativa = obter_tarefa_ativa()
+            if tarefa_ativa and tarefa_ativa["tipo_tarefa"] == "GEE_EXPORT":
+                st.session_state["tarefa_id_monitorada"] = tarefa_ativa["id"]
 
         col_spacer, col_reset, col_process = st.columns([6, 3, 3])
         with col_reset:
@@ -395,14 +306,48 @@ else:
                 f"Iniciar Processamento ({len(selected_rows)})", 
                 type="primary", 
                 use_container_width=True,
-                disabled=selected_rows.empty
+                disabled=selected_rows.empty or st.session_state.get("tarefa_id_monitorada") is not None
             )
 
         if btn_processar and not selected_rows.empty:
-            st.session_state["executar_processamento_gee"] = True
-            st.session_state["processamento_gee_concluido"] = False
-            st.session_state["logs_execucao"] = ""
-            st.rerun()
+            # Prepara o payload para a fila
+            selected_rows_list = []
+            for _, r in selected_rows.iterrows():
+                d_str = r['Data do Produto'].strftime('%Y-%m-%d') if isinstance(r['Data do Produto'], (datetime.date, datetime.datetime)) else str(r['Data do Produto'])
+                selected_rows_list.append({
+                    "Data do Produto": d_str,
+                    "Satélite": str(r['Satélite']),
+                    "Pixels Válidos": int(r['Pixels Válidos'])
+                })
+            
+            df_filtrado_list = []
+            for _, r in df_filtrado.iterrows():
+                d_str = r['data'].strftime('%Y-%m-%d') if isinstance(r['data'], (datetime.date, datetime.datetime)) else str(r['data'])
+                df_filtrado_list.append({
+                    "data": d_str,
+                    "satelite": str(r['satelite']),
+                    "z_grade_mgrs": str(r['z_grade_mgrs']) if pd.notna(r['z_grade_mgrs']) else None,
+                    "tamanho_pixel": int(r['tamanho_pixel'])
+                })
 
-        if st.session_state.get("executar_processamento_gee") or st.session_state.get("processamento_gee_concluido"):
-            processar_gee_modal(selected_rows, df_filtrado)
+            payload = {
+                "selected_rows": selected_rows_list,
+                "df_filtrado_data": df_filtrado_list
+            }
+            
+            # Cria a tarefa no banco de dados
+            tarefa_id = criar_tarefa_background("GEE_EXPORT", payload, len(selected_rows_list))
+            if tarefa_id:
+                st.session_state["tarefa_id_monitorada"] = tarefa_id
+                st.rerun()
+
+        if st.session_state.get("tarefa_id_monitorada"):
+            if hasattr(st, "dialog"):
+                @st.dialog("Processando no GEE 🛰️")
+                def processar_gee_modal(tid):
+                    processar_gee_conteudo(tid)
+                processar_gee_modal(st.session_state["tarefa_id_monitorada"])
+            else:
+                with st.expander("Processando no GEE 🛰️", expanded=True):
+                    processar_gee_conteudo(st.session_state["tarefa_id_monitorada"])
+
