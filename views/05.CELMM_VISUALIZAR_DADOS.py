@@ -248,9 +248,9 @@ else:
             """
             
         with col_c1:
-            st.markdown(card_destacado("Produtos Disponíveis", str(total_importados)), unsafe_allow_html=True)
+            st.markdown(card_destacado("Produtos Disponíveis", f"{total_importados:,}".replace(",", ".")), unsafe_allow_html=True)
         with col_c2:
-            st.markdown(card_destacado("&nbsp;", "&nbsp;"), unsafe_allow_html=True)
+            st.markdown(card_destacado("Total de Pixels", f"{total_pixels_est:,}".replace(",", ".")), unsafe_allow_html=True)
         with col_c3:
             st.markdown(card_destacado("&nbsp;", "&nbsp;"), unsafe_allow_html=True)
         st.text("")

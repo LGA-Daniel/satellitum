@@ -504,3 +504,15 @@ def obter_historico_tarefas(limit: int = 10) -> list:
         return []
     finally:
         db.close()
+
+def obter_total_pixels() -> int:
+    """Retorna o número total de registros na tabela celmm_pixels."""
+    db = SessionLocal()
+    try:
+        from modules.models import CelmmPixels
+        return db.query(func.count(CelmmPixels.id)).scalar() or 0
+    except Exception as e:
+        st.error(f"Erro ao contar pixels no banco: {e}")
+        return 0
+    finally:
+        db.close()
