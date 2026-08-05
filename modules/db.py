@@ -1,7 +1,5 @@
-import ee
 import os
 from typing import Optional
-
 import streamlit as st
 import pandas as pd
 from sqlalchemy import create_engine, func
@@ -124,183 +122,6 @@ def obter_metadados_salvos() -> list:
     finally:
         db.close()
 
-def obter_caminho_token() -> str:
-    """Retorna o caminho rígido do arquivo JSON de credenciais na pasta .streamlit da raiz do projeto."""
-    module_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(module_dir)
-    streamlit_dir = os.path.join(project_root, ".streamlit")
-    
-    if not os.path.exists(streamlit_dir):
-        raise FileNotFoundError(f"Diretório '.streamlit' não encontrado na raiz do projeto ({project_root}).")
-        
-    json_files = [f for f in os.listdir(streamlit_dir) if f.endswith('.json')]
-    if not json_files:
-        raise FileNotFoundError("Nenhum arquivo JSON de credenciais encontrado em '.streamlit'.")
-        
-    json_files.sort()
-    return os.path.join(streamlit_dir, json_files[0])
-
-@st.cache_resource
-def init_gee():
-    """Inicializa o GEE apenas uma vez por sessão."""
-    try:
-        project = os.getenv("EARTHENGINE_PROJECT", "ppgrhs")
-        ee.Initialize(project=project)
-        return True
-    except Exception as e:
-        st.error(f"Erro ao inicializar o Earth Engine: {e}. Verifique as credenciais.")
-        return False
-
-@st.cache_resource
-def obter_servico_gdrive():
-    """Retorna uma instância de cliente do Google Drive API (v3) autenticada com o token JSON."""
-    try:
-        from google.oauth2 import service_account
-        from googleapiclient.discovery import build
-        
-        json_path = obter_caminho_token()
-        
-        # Escopo padrão para acesso ao Drive
-        scopes = ['https://www.googleapis.com/auth/drive']
-        
-        credentials = service_account.Credentials.from_service_account_file(
-            json_path,
-            scopes=scopes
-        )
-        
-        service = build('drive', 'v3', credentials=credentials)
-        return service
-    except Exception as e:
-        st.error(f"Erro ao inicializar o cliente do Google Drive: {e}")
-        return None
-
-@st.cache_data(ttl=30)
-def listar_arquivos_pasta_drive(folder_name: str = 'CSV_Sentinel2') -> list:
-    """Lista todos os arquivos dentro de uma pasta específica no Google Drive da conta de serviço com lógica de retentativas."""
-    import time
-    
-    retries = 3
-    delay = 1
-    
-    for attempt in range(retries):
-        service = obter_servico_gdrive()
-        if not service:
-            if attempt == retries - 1:
-                return []
-            time.sleep(delay)
-            delay *= 2
-            continue
-            
-        try:
-            # 1. Busca pela pasta do Drive pelo nome e tipo mime
-            query_folder = f"name = '{folder_name}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
-            response_folder = service.files().list(q=query_folder, fields="files(id, name)").execute()
-            folders = response_folder.get('files', [])
-            
-            if not folders:
-                return []
-                
-            # Coleta os IDs das pastas encontradas
-            folder_ids = [f['id'] for f in folders]
-            
-            # 2. Lista os arquivos contidos nessas pastas
-            all_files = []
-            for fid in folder_ids:
-                query_files = f"'{fid}' in parents and trashed = false"
-                page_token = None
-                while True:
-                    response_files = service.files().list(
-                        q=query_files,
-                        fields="nextPageToken, files(id, name, mimeType, size, createdTime)",
-                        pageToken=page_token
-                    ).execute()
-                    all_files.extend(response_files.get('files', []))
-                    page_token = response_files.get('nextPageToken')
-                    if not page_token:
-                        break
-                        
-            return all_files
-        except Exception as e:
-            if attempt == retries - 1:
-                st.error(f"Erro ao listar arquivos da pasta '{folder_name}' no Google Drive após {retries} tentativas: {e}")
-                return []
-            else:
-                time.sleep(delay)
-                delay *= 2
-
-def baixar_conteudo_arquivo_drive(file_id: str) -> bytes:
-    """Retorna o conteúdo binário (bytes) de um arquivo no Google Drive com lógica de retentativas."""
-    import io
-    import time
-    from googleapiclient.http import MediaIoBaseDownload
-    
-    retries = 3
-    delay = 1
-    
-    for attempt in range(retries):
-        service = obter_servico_gdrive()
-        if not service:
-            if attempt == retries - 1:
-                raise ConnectionError("Não foi possível inicializar o serviço do Google Drive.")
-            time.sleep(delay)
-            delay *= 2
-            continue
-            
-        try:
-            request = service.files().get_media(fileId=file_id)
-            fh = io.BytesIO()
-            downloader = MediaIoBaseDownload(fh, request)
-            
-            done = False
-            while not done:
-                status, done = downloader.next_chunk()
-                
-            return fh.getvalue()
-        except Exception as e:
-            if attempt == retries - 1:
-                raise RuntimeError(f"Erro ao baixar conteúdo do arquivo do Drive após {retries} tentativas: {e}")
-            else:
-                time.sleep(delay)
-                delay *= 2
-
-def baixar_arquivo_drive_para_disco(file_id: str, dest_path: str):
-    """Baixa um arquivo do Google Drive diretamente para o disco para economizar RAM com lógica de retentativas."""
-    import time
-    from googleapiclient.http import MediaIoBaseDownload
-    
-    retries = 3
-    delay = 1
-    
-    for attempt in range(retries):
-        service = obter_servico_gdrive()
-        if not service:
-            if attempt == retries - 1:
-                raise ConnectionError("Não foi possível inicializar o serviço do Google Drive.")
-            time.sleep(delay)
-            delay *= 2
-            continue
-            
-        try:
-            request = service.files().get_media(fileId=file_id)
-            with open(dest_path, 'wb') as f:
-                downloader = MediaIoBaseDownload(f, request)
-                done = False
-                while not done:
-                    status, done = downloader.next_chunk()
-            return
-        except Exception as e:
-            import os
-            if os.path.exists(dest_path):
-                try:
-                    os.remove(dest_path)
-                except:
-                    pass
-            if attempt == retries - 1:
-                raise RuntimeError(f"Erro ao baixar arquivo do Drive para o disco após {retries} tentativas: {e}")
-            else:
-                time.sleep(delay)
-                delay *= 2
-
 def salvar_pixels_bulk(df_pixels) -> int:
     """Insere ou atualiza registros de pixels na tabela celmm_pixels usando PostgreSQL COPY via tabela temporária de estágio."""
     if df_pixels.empty:
@@ -309,7 +130,6 @@ def salvar_pixels_bulk(df_pixels) -> int:
     import io
     db = SessionLocal()
     try:
-        # Colunas na ordem que serão exportadas/importadas pelo COPY
         colunas = [
             'metadados_imagem_id', 'system_index', 'data', 'satelite', 
             'z_grade_mgrs', 'tamanho_pixel', 'zenital', 
@@ -317,29 +137,22 @@ def salvar_pixels_bulk(df_pixels) -> int:
             'latitude', 'longitude', 'geo'
         ]
         
-        # Cria um buffer CSV em memória com o DataFrame contendo apenas as colunas especificadas
         csv_buffer = io.StringIO()
         df_pixels.to_csv(csv_buffer, index=False, header=True, columns=colunas, sep=',')
         csv_buffer.seek(0)
         
-        # Acessa a conexão e o cursor DBAPI bruto (psycopg2)
         connection = db.connection()
         dbapi_conn = getattr(connection, "dbapi_connection", getattr(connection, "connection", None))
         if dbapi_conn is None:
             raise RuntimeError("Não foi possível obter a conexão DBAPI bruta do SQLAlchemy.")
             
         cursor = dbapi_conn.cursor()
-        
-        # 1. Cria a tabela temporária (sem chaves ou constraints para velocidade máxima)
         cursor.execute("CREATE TEMP TABLE temp_celmm_pixels (LIKE celmm_pixels INCLUDING DEFAULTS) ON COMMIT DROP;")
         
-        # 2. Executa o COPY rápido
-        # Adiciona aspas duplas ao redor dos nomes das colunas para manter a diferenciação de maiúsculas/minúsculas no PostgreSQL (ex: "B1")
         colunas_str = ", ".join([f'"{col}"' for col in colunas])
         copy_sql = f"COPY temp_celmm_pixels ({colunas_str}) FROM STDIN WITH CSV HEADER;"
         cursor.copy_expert(copy_sql, csv_buffer)
         
-        # 3. Executa o INSERT com resolução de conflito (ON CONFLICT DO UPDATE)
         insert_sql = f"""
             INSERT INTO celmm_pixels ({colunas_str})
             SELECT {colunas_str} FROM temp_celmm_pixels
@@ -379,8 +192,6 @@ def obter_ids_imagens_com_pixels() -> set:
     """Retorna um conjunto (set) de IDs de metadados_imagens que já possuem pixels associados na tabela celmm_pixels."""
     db = SessionLocal()
     try:
-        from modules.models import CelmmPixels
-        # Executa uma query leve para obter apenas a lista distinta de IDs
         resultado = db.query(CelmmPixels.metadados_imagem_id).distinct().all()
         return {r[0] for r in resultado}
     except Exception as e:
@@ -397,7 +208,6 @@ def obter_df_pixels_por_imagem_ids(imagem_ids: list, limit: int = None) -> pd.Da
         return pd.DataFrame()
     db = SessionLocal()
     try:
-        from modules.models import CelmmPixels
         query = db.query(CelmmPixels).filter(CelmmPixels.metadados_imagem_id.in_(imagem_ids))
         if limit is not None:
             query = query.limit(limit)
@@ -428,7 +238,6 @@ def obter_df_raster_cor_verdadeira_cached(metadados_imagem_id: int) -> pd.DataFr
         st.error(f"Erro ao buscar dados raster para a imagem ID {metadados_imagem_id}: {e}")
         return pd.DataFrame()
 
-
 def obter_df_pixels_por_imagem_ids_generator(imagem_ids: list, chunksize: int = 50000):
     """Retorna um gerador (generator) que busca os pixels da tabela celmm_pixels
     associados aos imagem_ids informados em lotes (chunks).
@@ -437,7 +246,6 @@ def obter_df_pixels_por_imagem_ids_generator(imagem_ids: list, chunksize: int = 
         return
     db = SessionLocal()
     try:
-        from modules.models import CelmmPixels
         query = db.query(CelmmPixels).filter(CelmmPixels.metadados_imagem_id.in_(imagem_ids))
         for chunk in pd.read_sql(query.statement, db.bind, chunksize=chunksize):
             yield chunk
@@ -474,7 +282,6 @@ def obter_tarefa_ativa() -> Optional[dict]:
     """Retorna a tarefa de background ativa (em andamento ou pendente), se houver."""
     db = SessionLocal()
     try:
-        # Busca primeiro 'processando', depois 'pendente'
         tarefa = db.query(BackgroundTask).filter(BackgroundTask.status == "processando").first()
         if not tarefa:
             tarefa = db.query(BackgroundTask).filter(BackgroundTask.status == "pendente").order_by(BackgroundTask.id.asc()).first()
@@ -529,7 +336,6 @@ def obter_total_pixels() -> int:
     """Retorna o número total de registros na tabela celmm_pixels."""
     db = SessionLocal()
     try:
-        from modules.models import CelmmPixels
         return db.query(func.count(CelmmPixels.id)).scalar() or 0
     except Exception as e:
         st.error(f"Erro ao contar pixels no banco: {e}")

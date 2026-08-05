@@ -5,7 +5,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from modules.models import Base
-from modules.core import engine
+from modules.db import engine
 from sqlalchemy import inspect, text
 
 def run():

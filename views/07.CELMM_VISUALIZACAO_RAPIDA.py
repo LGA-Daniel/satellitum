@@ -1,10 +1,10 @@
 import streamlit as st
 import pandas as pd
-from modules.core import obter_metadados_salvos
-from modules.raster import (
-    obter_df_raster_cor_verdadeira_cached,
-    processar_matriz_cor_verdadeira
+from modules.db import (
+    obter_metadados_salvos,
+    obter_df_raster_cor_verdadeira_cached
 )
+from modules.raster import processar_matriz_cor_verdadeira
 
 st.set_page_config(page_title="CELMM | Visualização Rápida (RGB)", page_icon="🖼️", layout="wide")
 

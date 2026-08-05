@@ -4,16 +4,18 @@ import datetime
 import os
 import shutil
 import inspect
-from modules.core import (
+from modules.db import (
     obter_metadados_salvos, 
-    listar_arquivos_pasta_drive, 
-    baixar_arquivo_drive_para_disco, 
     salvar_pixels_bulk, 
     obter_ids_imagens_com_pixels,
     criar_tarefa_background,
     obter_tarefa_ativa,
     obter_status_tarefa,
     cancelar_tarefa
+)
+from modules.api_gdrive import (
+    listar_arquivos_pasta_drive, 
+    baixar_arquivo_drive_para_disco
 )
 
 st.set_page_config(page_title="CELMM | Sincronizar Produtos", page_icon="🛰️", layout="wide")

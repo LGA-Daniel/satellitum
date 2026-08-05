@@ -4,15 +4,15 @@ import datetime
 import time
 import ee
 import inspect
-from modules.core import (
-    init_gee, 
+from modules.db import (
     obter_metadados_salvos, 
     criar_tarefa_background, 
     obter_tarefa_ativa, 
     obter_status_tarefa, 
-    cancelar_tarefa,
-    listar_arquivos_pasta_drive
+    cancelar_tarefa
 )
+from modules.api_gee import init_gee
+from modules.api_gdrive import listar_arquivos_pasta_drive
 
 # Inicializa o contador de reset de filtros se não existir
 if 'reset_counter' not in st.session_state:

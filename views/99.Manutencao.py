@@ -3,7 +3,7 @@ import io
 import pandas as pd
 import datetime
 from contextlib import redirect_stdout
-from modules.core import (
+from modules.db import (
     obter_historico_tarefas, 
     obter_status_tarefa, 
     cancelar_tarefa, 

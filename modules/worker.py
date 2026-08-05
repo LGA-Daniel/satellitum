@@ -5,12 +5,14 @@ import json
 import os
 import ee
 import pandas as pd
-from modules.core import (
+from modules.db import (
     SessionLocal, 
-    init_gee, 
-    baixar_arquivo_drive_para_disco, 
     salvar_pixels_bulk,
-    obter_metadados_salvos,
+    obter_metadados_salvos
+)
+from modules.api_gee import init_gee
+from modules.api_gdrive import (
+    baixar_arquivo_drive_para_disco,
     obter_servico_gdrive
 )
 from modules.models import BackgroundTask

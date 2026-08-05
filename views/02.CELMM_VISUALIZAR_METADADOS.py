@@ -2,7 +2,8 @@ import streamlit as st
 import pandas as pd
 import datetime
 import ee
-from modules.core import obter_metadados_salvos, init_gee, salvar_metadados
+from modules.db import obter_metadados_salvos, salvar_metadados, verificar_metadados_existentes
+from modules.api_gee import init_gee, buscar_metadados_gee
 
 st.set_page_config(page_title="CELMM | Explorar Metadados", page_icon="🛰️", layout="wide")
 if 'show_buscar_modal' not in st.session_state:
@@ -268,7 +269,7 @@ def _buscar_produtos_modal_impl():
             st.button("Reiniciar Busca", type="secondary", use_container_width=True, key="busca_modal_btn_reset", on_click=reset_busca_callback)
         with col_save:
             if st.button("Salvar no Banco", type="primary", use_container_width=True, key="busca_modal_btn_save"):
-                from modules.core import verificar_metadados_existentes
+                from modules.db import verificar_metadados_existentes
                 conflitos = verificar_metadados_existentes(
                     st.session_state['busca_modal_dados'], 
                     st.session_state['busca_modal_pixel_salvo']
