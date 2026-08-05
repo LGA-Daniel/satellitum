@@ -409,6 +409,26 @@ def obter_df_pixels_por_imagem_ids(imagem_ids: list, limit: int = None) -> pd.Da
     finally:
         db.close()
 
+@st.cache_data(ttl=600)
+def obter_df_raster_cor_verdadeira_cached(metadados_imagem_id: int) -> pd.DataFrame:
+    """Busca com cache do Streamlit as colunas de coordenadas e bandas B4, B3, B2 para uma imagem raster."""
+    if not metadados_imagem_id:
+        return pd.DataFrame()
+    try:
+        from sqlalchemy import text
+        query = text("""
+            SELECT latitude, longitude, "B4", "B3", "B2"
+            FROM celmm_pixels
+            WHERE metadados_imagem_id = :img_id
+        """)
+        with engine.connect() as conn:
+            df = pd.read_sql(query, conn, params={"img_id": metadados_imagem_id})
+        return df
+    except Exception as e:
+        st.error(f"Erro ao buscar dados raster para a imagem ID {metadados_imagem_id}: {e}")
+        return pd.DataFrame()
+
+
 def obter_df_pixels_por_imagem_ids_generator(imagem_ids: list, chunksize: int = 50000):
     """Retorna um gerador (generator) que busca os pixels da tabela celmm_pixels
     associados aos imagem_ids informados em lotes (chunks).

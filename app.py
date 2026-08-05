@@ -4,22 +4,25 @@ import streamlit as st
 # Injeta CSS global da aplicação
 st.html("""
     <style>
-        /* Oculta a página de prévia de dados do menu lateral */
-        a[href*="celmm_previa_dados"] {
+        /* Oculta as páginas de prévia e visualização rápida do menu lateral */
+        a[href*="celmm_previa_dados"],
+        a[href*="celmm_visualizacao_rapida"] {
             display: none !important;
         }
         
-        /* Ajusta a largura global das janelas modais (st.dialog) */
+        /* Ajusta a largura global das janelas modais (st.dialog) para 50% da largura da tela */
         @media (min-width: 768px) {
             div[data-testid="stDialog"] div[role="dialog"],
-            div[data-testid="stDialog"] div[aria-modal="true"] {
-                width: 60vw !important;
-                max-width: 60vw !important;
+            div[data-testid="stDialog"] div[aria-modal="true"],
+            div[data-testid="stDialog"] > div:first-child {
+                width: 50vw !important;
+                max-width: 50vw !important;
             }
         }
         @media (max-width: 767px) {
             div[data-testid="stDialog"] div[role="dialog"],
-            div[data-testid="stDialog"] div[aria-modal="true"] {
+            div[data-testid="stDialog"] div[aria-modal="true"],
+            div[data-testid="stDialog"] > div:first-child {
                 width: 90vw !important;
                 max-width: 90vw !important;
             }
@@ -35,6 +38,7 @@ paginas = st.navigation([
     st.Page("views/04.CELMM_ARQUIVOS_DRIVE.py", title="CELMM - Sincronizar Produtos"),
     st.Page("views/05.CELMM_VISUALIZAR_DADOS.py", title="CELMM - Visualizar e Exportar Dados", url_path="celmm_visualizar_dados"),
     st.Page("views/06.CELMM_PREVIA_DADOS.py", title="CELMM - Prévia de Dados", url_path="celmm_previa_dados"),
+    st.Page("views/07.CELMM_VISUALIZACAO_RAPIDA.py", title="CELMM - Visualização Rápida", url_path="celmm_visualizacao_rapida"),
     st.Page("views/99.Manutencao.py", title="Configurações do Sistema"),
 
 ])

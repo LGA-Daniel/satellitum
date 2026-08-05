@@ -294,12 +294,13 @@ def _buscar_produtos_modal_impl():
 
 import inspect
 sig = inspect.signature(st.dialog)
+dialog_kwargs = {"width": "large"} if "width" in sig.parameters else {}
 if 'on_dismiss' in sig.parameters:
-    @st.dialog("Buscar Produtos no GEE", on_dismiss=on_dismiss_callback)
+    @st.dialog("Buscar Produtos no GEE", on_dismiss=on_dismiss_callback, **dialog_kwargs)
     def buscar_produtos_modal():
         _buscar_produtos_modal_impl()
 else:
-    @st.dialog("Buscar Produtos no GEE", dismissible=True)
+    @st.dialog("Buscar Produtos no GEE", dismissible=True, **dialog_kwargs)
     def buscar_produtos_modal():
         _buscar_produtos_modal_impl()
 

@@ -120,7 +120,10 @@ def exportar_conteudo_modal(ids_imagens, tipo_formato):
     )
 
 if hasattr(st, "dialog"):
-    modal_exportar = st.dialog("Preparando Exportação de Dados")(exportar_conteudo_modal)
+    import inspect
+    sig = inspect.signature(st.dialog)
+    dialog_kwargs = {"width": "large"} if "width" in sig.parameters else {}
+    modal_exportar = st.dialog("Preparando Exportação de Dados", **dialog_kwargs)(exportar_conteudo_modal)
 else:
     def modal_exportar(ids_imagens, tipo_formato):
         with st.expander("Preparando Exportação de Dados", expanded=True):
@@ -295,13 +298,15 @@ else:
         
         selected_rows = edited_df[edited_df["Selecionar"] == True]
         
-        # Três colunas de botões de controle abaixo da tabela de seleção (Sempre visíveis no mesmo local)
-        col_vis, col_csv, col_xlsx = st.columns(3)
+        # Quatro colunas de botões de controle abaixo da tabela de seleção (Sempre visíveis no mesmo local)
+        col_vis, col_rgb, col_csv, col_xlsx = st.columns(4)
         
         if selected_rows.empty:
             # Caso não haja nenhuma imagem válida selecionada, renderiza os botões desabilitados
             with col_vis:
-                st.button("Visualizar Dados", type="primary", disabled=True, use_container_width=True, help="Selecione pelo menos uma data.", key="btn_vis_disabled")
+                st.button("Prévia Tabela", type="secondary", disabled=True, use_container_width=True, help="Selecione pelo menos uma data.", key="btn_vis_disabled")
+            with col_rgb:
+                st.button("Visualizar Cor Verdadeira", type="primary", disabled=True, use_container_width=True, help="Selecione pelo menos uma data.", key="btn_rgb_disabled")
             with col_csv:
                 st.button("Baixar em CSV", type="secondary", disabled=True, use_container_width=True, help="Selecione pelo menos uma data.", key="btn_csv_disabled")
             with col_xlsx:
@@ -347,15 +352,26 @@ else:
             # Usamos os mesmos containers de colunas criados anteriormente
             
             with col_vis:
-                if st.button("Visualizar Dados", type="primary", use_container_width=True, key="btn_vis_enabled"):
-                    # Se não carregou o preview, carrega agora
-                    if st.session_state["df_pixels_carregados"] is None:
-                        with st.spinner("Buscando pixels (preview) na base de dados..."):
-                            df_pixels = obter_df_pixels_por_imagem_ids(ids_imagens, limit=500)
-                            st.session_state["df_pixels_carregados"] = df_pixels
-                            st.session_state["ids_pixels_carregados"] = ids_imagens
-                            st.session_state["carregado_parcial"] = True
-                    st.switch_page("views/06.CELMM_PREVIA_DADOS.py")
+                if len(ids_imagens) == 1:
+                    if st.button("Prévia Tabela", type="secondary", use_container_width=True, key="btn_vis_enabled"):
+                        # Se não carregou o preview, carrega agora
+                        if st.session_state["df_pixels_carregados"] is None:
+                            with st.spinner("Buscando pixels (preview) na base de dados..."):
+                                df_pixels = obter_df_pixels_por_imagem_ids(ids_imagens, limit=500)
+                                st.session_state["df_pixels_carregados"] = df_pixels
+                                st.session_state["ids_pixels_carregados"] = ids_imagens
+                                st.session_state["carregado_parcial"] = True
+                        st.switch_page("views/06.CELMM_PREVIA_DADOS.py")
+                else:
+                    st.button("Prévia Tabela", type="secondary", disabled=True, use_container_width=True, help="Selecione apenas 1 produto por vez para visualizar a prévia dos dados.", key="btn_vis_disabled_multi")
+
+            with col_rgb:
+                if len(ids_imagens) == 1:
+                    if st.button("Visualizar Cor Verdadeira", type="primary", use_container_width=True, key="btn_rgb_enabled"):
+                        st.session_state["ids_pixels_carregados"] = ids_imagens
+                        st.switch_page("views/07.CELMM_VISUALIZACAO_RAPIDA.py")
+                else:
+                    st.button("Visualizar Cor Verdadeira", type="primary", disabled=True, use_container_width=True, help="Selecione apenas 1 produto por vez para visualizar em Cor Verdadeira.", key="btn_rgb_disabled_multi")
                     
             with col_csv:
                 if st.button("Baixar em CSV", type="secondary", use_container_width=True, key="btn_csv_enabled"):
@@ -364,3 +380,5 @@ else:
             with col_xlsx:
                 if st.button("Baixar em XLSX", type="secondary", use_container_width=True, key="btn_xlsx_enabled"):
                     modal_exportar(ids_imagens, 'xlsx')
+
+st.warning("⚠️ **Nota:** Os dados das bandas espectrais (B1 a B12) são mantidos e exibidos em valores brutos de **Número Digital (DN)**.")

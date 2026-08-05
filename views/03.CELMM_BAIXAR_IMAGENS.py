@@ -106,12 +106,13 @@ def processar_gee_conteudo(tarefa_id):
 
 if hasattr(st, "dialog"):
     sig = inspect.signature(st.dialog)
+    dialog_kwargs = {"width": "large"} if "width" in sig.parameters else {}
     if 'on_dismiss' in sig.parameters:
-        @st.dialog("Processando no GEE", dismissible=False, on_dismiss=on_dismiss_gee_callback)
+        @st.dialog("Processando no GEE", dismissible=False, on_dismiss=on_dismiss_gee_callback, **dialog_kwargs)
         def processar_gee_modal(tid):
             processar_gee_conteudo(tid)
     else:
-        @st.dialog("Processando no GEE", dismissible=False)
+        @st.dialog("Processando no GEE", dismissible=False, **dialog_kwargs)
         def processar_gee_modal(tid):
             processar_gee_conteudo(tid)
 else:

@@ -128,7 +128,9 @@ def baixar_arquivos_conteudo(valid_selected, map_nome_id):
 
 # Definição dinâmica do modal para suportar retrocompatibilidade do Streamlit
 if hasattr(st, "dialog"):
-    baixar_arquivos_modal = st.dialog("Baixar Arquivos do Google Drive")(baixar_arquivos_conteudo)
+    sig = inspect.signature(st.dialog)
+    dialog_kwargs = {"width": "large"} if "width" in sig.parameters else {}
+    baixar_arquivos_modal = st.dialog("Baixar Arquivos do Google Drive", **dialog_kwargs)(baixar_arquivos_conteudo)
 else:
     def baixar_arquivos_modal(valid_selected, map_nome_id):
         with st.expander("Preparação do Download", expanded=True):
@@ -210,12 +212,13 @@ def processar_csv_conteudo(tarefa_id):
 
 if hasattr(st, "dialog"):
     sig = inspect.signature(st.dialog)
+    dialog_kwargs = {"width": "large"} if "width" in sig.parameters else {}
     if 'on_dismiss' in sig.parameters:
-        @st.dialog("Processar CSV para a Base de Dados", dismissible=False, on_dismiss=on_dismiss_csv_callback)
+        @st.dialog("Processar CSV para a Base de Dados", dismissible=False, on_dismiss=on_dismiss_csv_callback, **dialog_kwargs)
         def processar_csv_modal(tid):
             processar_csv_conteudo(tid)
     else:
-        @st.dialog("Processar CSV para a Base de Dados", dismissible=False)
+        @st.dialog("Processar CSV para a Base de Dados", dismissible=False, **dialog_kwargs)
         def processar_csv_modal(tid):
             processar_csv_conteudo(tid)
 else:

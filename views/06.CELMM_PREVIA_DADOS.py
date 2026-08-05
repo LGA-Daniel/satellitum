@@ -115,7 +115,10 @@ def exportar_conteudo_modal(ids_imagens, tipo_formato):
     )
 
 if hasattr(st, "dialog"):
-    modal_exportar = st.dialog("Preparando Exportação de Dados")(exportar_conteudo_modal)
+    import inspect
+    sig = inspect.signature(st.dialog)
+    dialog_kwargs = {"width": "large"} if "width" in sig.parameters else {}
+    modal_exportar = st.dialog("Preparando Exportação de Dados", **dialog_kwargs)(exportar_conteudo_modal)
 else:
     def modal_exportar(ids_imagens, tipo_formato):
         with st.expander("Preparação do Download", expanded=True):
@@ -125,6 +128,7 @@ st.set_page_config(page_title="CELMM | Prévia de Dados", page_icon="🛰️", l
 
 st.title("CELMM - Prévia de Dados")
 st.caption("Visualização rápida das primeiras 500 linhas dos dados de pixels carregados da base de dados PostgreSQL.")
+st.warning("⚠️ **Nota:** Os dados das bandas espectrais (B1 a B12) são mantidos e exibidos em valores brutos de **Número Digital (DN)**.")
 st.divider()
 
 if "df_pixels_carregados" not in st.session_state or st.session_state["df_pixels_carregados"] is None:
@@ -154,8 +158,16 @@ else:
         
     st.dataframe(df_export.head(500), use_container_width=True)
     
-    col_csv, col_xlsx = st.columns(2)
+    col_rgb, col_csv, col_xlsx = st.columns(3)
     
+    with col_rgb:
+        ids_carregados = st.session_state.get("ids_pixels_carregados", [])
+        if len(ids_carregados) == 1:
+            if st.button("Visualizar Cor Verdadeira", type="primary", use_container_width=True):
+                st.switch_page("views/07.CELMM_VISUALIZACAO_RAPIDA.py")
+        else:
+            st.button("Visualizar Cor Verdadeira", type="primary", disabled=True, use_container_width=True, help="Selecione apenas 1 produto por vez para visualizar em Cor Verdadeira.")
+
     with col_csv:
         if st.button("Baixar em CSV", type="secondary", use_container_width=True):
             modal_exportar(st.session_state["ids_pixels_carregados"], 'csv')

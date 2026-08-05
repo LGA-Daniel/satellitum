@@ -30,7 +30,7 @@ with tab_db:
     if st.button("Verificar e Sincronizar Tabelas do Banco", type="primary"):
         with st.spinner("Executando verificação de tabelas no PostgreSQL..."):
             try:
-                from src.verificar_banco import run as verificar_db
+                from modules.verificar_banco import run as verificar_db
                 
                 # Captura os prints do script
                 buffer = io.StringIO()
