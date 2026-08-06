@@ -56,8 +56,9 @@ def processar_matriz_cor_verdadeira(df: pd.DataFrame):
     rows = np.round((max_lat - df_proc['latitude'].values) / step_lat).astype(int)
     cols = np.round((df_proc['longitude'].values - min_lon) / step_lon).astype(int)
     
-    rows = np.clip(rows, 0, 2000)
-    cols = np.clip(cols, 0, 2000)
+    # Garante índices não-negativos sem achatar ou cortar bordas superiores
+    rows = np.maximum(rows, 0)
+    cols = np.maximum(cols, 0)
     
     n_rows = int(rows.max() + 1)
     n_cols = int(cols.max() + 1)
@@ -76,18 +77,9 @@ def processar_matriz_cor_verdadeira(df: pd.DataFrame):
     
     for b in ordem_bandas:
         grid_band = grids[b]
-        valid_vals = grid_band[data_mask]
-        
-        if len(valid_vals) > 0:
-            p2 = np.percentile(valid_vals, 2.0)
-            p98 = np.percentile(valid_vals, 98.0)
-            if p98 <= p2:
-                p98 = p2 + 1e-6
-            norm = (grid_band - p2) / (p98 - p2)
-        else:
-            norm = grid_band
-            
-        norm = np.clip(norm, 0.0, 1.0)
+        # Normalização linear direta sem filtro de contraste por percentil (p2/p98)
+        # Converte a escala de Número Digital (DN 0 a 3000) para 0.0 - 1.0
+        norm = np.clip(grid_band / 3000.0, 0.0, 1.0)
         # Onde não houver dados, preenche o canal com 1.0 (branco)
         norm[~data_mask] = 1.0
         canais_norm.append(norm)

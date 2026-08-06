@@ -34,13 +34,13 @@ else:
 st.set_page_config(page_title="CELMM | Prévia de Dados", page_icon="🛰️", layout="wide")
 
 st.title("CELMM - Prévia de Dados")
-st.caption("Visualização rápida das primeiras 500 linhas dos dados de pixels carregados da base de dados PostgreSQL.")
+
 st.warning("⚠️ **Nota:** Os dados das bandas espectrais (B1 a B12) são mantidos e exibidos em valores brutos de **Número Digital (DN)**.")
-st.divider()
+st.markdown("")
 
 if "df_pixels_carregados" not in st.session_state or st.session_state["df_pixels_carregados"] is None:
     st.warning("Nenhum dado carregado na sessão para visualização.")
-    if st.button("Voltar para Exportador", type="primary", use_container_width=True, key="btn_voltar_no_data"):
+    if st.button("Voltar", type="primary", use_container_width=True, key="btn_voltar_no_data"):
         st.switch_page("views/05.CELMM_VISUALIZAR_DADOS.py")
 else:
     df_pixels = st.session_state["df_pixels_carregados"]
@@ -56,17 +56,26 @@ else:
     with col_text:
         # Se carregamos parcial, o total real pode ser maior que o len do dataframe
         if st.session_state.get("carregado_parcial", True):
-            st.write("Exibindo uma amostra rápida das primeiras **500** linhas dos dados (Modo Preview):")
+            st.write("Amostra  de Dados (500 primeiras linhas).")
         else:
-            st.write(f"Exibindo uma amostra das primeiras **500** linhas de um total de **{total_pixels:,}** pixels carregados do banco:")
+            st.write(f"Amostra das primeiras **500** linhas de um total de **{total_pixels:,}** pixels carregados do banco:")
     with col_btn:
-        if st.button("Voltar para Exportador", type="primary", use_container_width=True, key="btn_voltar_with_data"):
+        if st.button("Voltar", type="primary", use_container_width=True, key="btn_voltar_with_data"):
             st.switch_page("views/05.CELMM_VISUALIZAR_DADOS.py")
         
     st.dataframe(df_export.head(500), use_container_width=True)
     
-    col_rgb, col_csv, col_xlsx = st.columns(3)
-    
+    st.markdown("")
+    col_1, col_rgb, col_csv, col_xlsx = st.columns([3, 3, 3, 3])
+        
+    with col_csv:
+        if st.button("Baixar em CSV", type="primary", use_container_width=True):
+            modal_exportar(st.session_state["ids_pixels_carregados"], 'csv')
+            
+    with col_xlsx:
+        if st.button("Baixar em XLSX", type="primary", use_container_width=True):
+            modal_exportar(st.session_state["ids_pixels_carregados"], 'xlsx')
+
     with col_rgb:
         ids_carregados = st.session_state.get("ids_pixels_carregados", [])
         if len(ids_carregados) == 1:
@@ -74,13 +83,3 @@ else:
                 st.switch_page("views/07.CELMM_VISUALIZACAO_RAPIDA.py")
         else:
             st.button("Visualizar Cor Verdadeira", type="primary", disabled=True, use_container_width=True, help="Selecione apenas 1 produto por vez para visualizar em Cor Verdadeira.")
-
-    with col_csv:
-        if st.button("Baixar em CSV", type="secondary", use_container_width=True):
-            modal_exportar(st.session_state["ids_pixels_carregados"], 'csv')
-            
-    with col_xlsx:
-        if st.button("Baixar em XLSX", type="secondary", use_container_width=True):
-            modal_exportar(st.session_state["ids_pixels_carregados"], 'xlsx')
-                
-
