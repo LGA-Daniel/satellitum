@@ -22,7 +22,7 @@ services:
     ports:
       - "8503:8501"
     volumes:
-      - .:/app  
+      - .:/app
       - ~/.config/earthengine:/root/.config/earthengine
       - /storage/datasets:/data/datasets
     environment:
@@ -40,9 +40,9 @@ services:
     build: .
     container_name: satellitum_worker
     restart: always
-    entrypoint: ["python3", "-m", "modules.worker"]
+    entrypoint: [ "python3", "-m", "modules.worker" ]
     volumes:
-      - .:/app  
+      - .:/app
       - ~/.config/earthengine:/root/.config/earthengine
       - /storage/datasets:/data/datasets
     environment:
@@ -56,21 +56,21 @@ services:
     networks:
       - satellitum_network
 
-  satellitum_pgadmin:
-    image: dpage/pgadmin4
-    container_name: satellitum_pgadmin
-    restart: always
-    environment:
-      PGADMIN_DEFAULT_EMAIL: admin@admin.com
-      PGADMIN_DEFAULT_PASSWORD: admin
-    ports:
-      - "5050:80"
-    volumes:
-      - pgadmin_data:/var/lib/pgadmin
-    depends_on:
-      - satellitum_db
-    networks:
-      - satellitum_network
+#  satellitum_pgadmin:
+#    image: dpage/pgadmin4
+#    container_name: satellitum_pgadmin
+#    restart: always
+#    environment:
+#      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+#      PGADMIN_DEFAULT_PASSWORD: admin
+#    ports:
+#      - "5050:80"
+#    volumes:
+#      - pgadmin_data:/var/lib/pgadmin
+#    depends_on:
+#      - satellitum_db
+#    networks:
+#      - satellitum_network
 
 networks:
   satellitum_network:

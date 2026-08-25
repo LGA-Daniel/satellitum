@@ -1,7 +1,7 @@
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from sqlalchemy import String, Integer, DateTime, Float, UniqueConstraint, ForeignKey, Text, func
+from sqlalchemy import String, Integer, DateTime, Float, UniqueConstraint, ForeignKey, Text, func, JSON
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
 
 class Base(DeclarativeBase):
     pass
@@ -152,3 +152,24 @@ class BackgroundTask(Base):
             "atualizado_em": self.atualizado_em.isoformat() if self.atualizado_em else None
         }
 
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(100), unique=True, index=True, nullable=False)
+    name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    data_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    salt: Mapped[str] = mapped_column(String(64), nullable=False)
+    role: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, default="user")
+    views: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+    def to_dict(self) -> dict:
+        """Retorna os dados do usuário para uso seguro em sessão e visualização."""
+        return {
+            "id": self.id,
+            "username": self.username,
+            "name": self.name or "",
+            "views": self.views if self.views is not None else [],
+            "created_at": self.created_at.strftime("%d/%m/%Y %H:%M:%S") if self.created_at else None
+        }

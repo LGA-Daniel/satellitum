@@ -5,7 +5,7 @@ import pandas as pd
 from sqlalchemy import create_engine, func
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.dialects.postgresql import insert
-from modules.models import HistoricoExecucao, MetadadosImagens, CelmmPixels, BackgroundTask
+from modules.models import HistoricoExecucao, MetadadosImagens, CelmmPixels, BackgroundTask, User
 
 # Configurações do Banco de Dados
 DB_HOST = os.getenv("DB_HOST", "satellitum_db")

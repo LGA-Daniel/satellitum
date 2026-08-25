@@ -10,13 +10,13 @@ from modules.db import (
     obter_tarefa_ativa
 )
 
-st.set_page_config(page_title="Satellitum | Configurações do Sistema", page_icon="🛰️", layout="wide")
-
 st.title("Configurações do Sistema")
 st.divider()
 
 # Cria as abas de configuração
 tab_db, tab_batch = st.tabs(["Banco de Dados", "Operações em Lote"])
+
+
 
 with tab_db:
     # Inicializa logs no session_state para que sobrevivam ao rerun
@@ -146,3 +146,4 @@ with tab_batch:
                     file_name=f"log_tarefa_{id_selecionado}_{datetime.date.today()}.txt",
                     mime="text/plain"
                 )
+
