@@ -14,7 +14,125 @@ st.title("Configurações do Sistema")
 st.divider()
 
 # Cria as abas de configuração
-tab_db, tab_batch = st.tabs(["Banco de Dados", "Operações em Lote"])
+tab_auth, tab_db, tab_batch = st.tabs([
+    "🔑 Autenticação Google (Drive & GEE)", 
+    "🗄️ Banco de Dados", 
+    "⚙️ Operações em Lote"
+])
+
+with tab_auth:
+    from modules.google_auth import (
+        obter_status_autenticacao,
+        get_login_url,
+        get_tokens,
+        processar_e_salvar_tokens,
+        limpar_credenciais,
+        testar_conexao_gdrive,
+        testar_conexao_gee
+    )
+    import os
+
+    st.subheader("Autenticação Google")
+    st.write(
+        "Conexão com a conta Google para acesso ao Google Drive e Google Earth Engine (GEE)."
+    )
+    st.text("")
+
+    # --- 1. STATUS ATUAL DAS CREDENCIAIS ---
+    status = obter_status_autenticacao()
+
+    col_st1, col_st2 = st.columns(2)
+    with col_st1:
+        if status["valido"]:
+            st.success("✅ **Status:** Autenticado")
+        else:
+            st.warning("⚠️ **Status:** Não Autenticado")
+    with col_st2:
+        st.info(f"**Tipo:** {status['tipo']}")
+
+    st.divider()
+
+    # --- 2. FLUXO DE LOGIN OFICIAL OAUTH WEB ---
+    st.markdown("#### 1. Conectar / Renovar Conta Google")
+    st.write(
+        "Autenticação OAuth 2.0 unificada com o projeto Google Cloud configurado."
+    )
+
+    # Verifica se a URL atual contém o parâmetro 'code' retornado pelo Google
+    query_params = st.query_params
+
+    if "code" in query_params:
+        raw_code = query_params["code"]
+        if isinstance(raw_code, list):
+            raw_code = raw_code[0]
+            
+        with st.spinner("Autenticando e gravando credenciais..."):
+            tokens = get_tokens(raw_code)
+            if "access_token" in tokens:
+                st.query_params.clear()
+                processar_e_salvar_tokens(tokens)
+                st.success("🎉 Autenticado com sucesso na sua conta Google!")
+                st.rerun()
+            else:
+                err_msg = tokens.get("error_description") or tokens.get("error") or "Falha ao obter tokens."
+                st.error(f"Erro na autenticação: {err_msg}")
+                st.query_params.clear()
+
+    # Exibe o botão de login direto e opção de limpar credenciais
+    try:
+        login_url = get_login_url()
+        col_btn_login, col_btn_clear, _ = st.columns([2.5, 2.5, 7])
+        with col_btn_login:
+            st.link_button(
+                "🚀 Login com Google ↗",
+                url=login_url,
+                type="primary",
+                use_container_width=True
+            )
+        with col_btn_clear:
+            if status["valido"]:
+                if st.button("🗑️ Desconectar Conta", use_container_width=True, help="Remove os arquivos de tokens e credenciais salvos"):
+                    limpar_credenciais()
+                    st.toast("Credenciais removidas com sucesso!", icon="🗑️")
+                    st.rerun()
+    except Exception as e:
+        st.error(f"Erro ao gerar link de login: {e}")
+
+    st.divider()
+
+    # --- 3. TESTES DE CONEXÃO (MODAIS) ---
+    @st.dialog("🔍 Teste de Conexão com Google Drive", width="medium")
+    def modal_teste_drive():
+        st.write("Executando validação de comunicação com a API do **Google Drive (v3)**...")
+        with st.spinner("Consultando serviço..."):
+            ok_drive, msg_drive = testar_conexao_gdrive()
+        if ok_drive:
+            st.success(msg_drive)
+        else:
+            st.error(msg_drive)
+
+    @st.dialog("🌍 Teste de Conexão com Earth Engine (GEE)", width="medium")
+    def modal_teste_gee():
+        st.write("Executando inicialização e teste de computação com o **Google Earth Engine**...")
+        with st.spinner("Consultando serviço..."):
+            ok_gee, msg_gee = testar_conexao_gee()
+        if ok_gee:
+            st.success(msg_gee)
+        else:
+            st.error(msg_gee)
+
+    st.markdown("#### 2. Testes de Conectividade")
+    st.write("Valide se a aplicação consegue se comunicar com as APIs do Google Drive e do Earth Engine:")
+    
+    col_t1, col_t2, _ = st.columns([2.5, 2.5, 7])
+    with col_t1:
+        if st.button("🔍 Testar Google Drive", use_container_width=True):
+            modal_teste_drive()
+
+    with col_t2:
+        if st.button("🌍 Testar Earth Engine", use_container_width=True):
+            modal_teste_gee()
+
 
 
 

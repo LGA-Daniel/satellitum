@@ -74,9 +74,36 @@ setup_database()
 cookie_manager = stx.CookieManager(key="satellitum_auth_cookie_manager")
 
 # ==============================================================================
+# 0. CAPTURA E PROCESSAMENTO AUTOMÁTICO DO RETORNO GOOGLE OAUTH
+# ==============================================================================
+if "code" in st.query_params:
+    raw_code = st.query_params["code"]
+    if isinstance(raw_code, list):
+        raw_code = raw_code[0]
+        
+    last_processed = st.session_state.get("_last_processed_oauth_code")
+    if raw_code and raw_code != last_processed:
+        st.session_state["_last_processed_oauth_code"] = raw_code
+        try:
+            from modules.google_auth import get_tokens, processar_e_salvar_tokens
+            tokens = get_tokens(raw_code)
+            if "access_token" in tokens:
+                processar_e_salvar_tokens(tokens)
+                st.toast("🎉 Conta Google autenticada e credenciais salvas com sucesso!", icon="✅")
+                st.query_params.clear()
+                st.rerun()
+            else:
+                err_msg = tokens.get("error_description") or tokens.get("error") or "Falha ao obter tokens."
+                st.toast(f"⚠️ Erro no Google OAuth: {err_msg}", icon="❌")
+                st.query_params.clear()
+        except Exception as e:
+            st.toast(f"⚠️ Erro ao processar tokens: {e}", icon="❌")
+            st.query_params.clear()
+
+# ==============================================================================
 # 1. VERIFICAÇÃO AUTOMÁTICA DE SESSÃO & COOKIE JWT
 # ==============================================================================
-if "user" not in st.session_state or st.session_state.user is None:
+if ("user" not in st.session_state or st.session_state.user is None) and not st.session_state.get("logged_out"):
     auth_token = cookie_manager.get(cookie="auth_token")
     if auth_token:
         user_instance = validate_token(auth_token)
@@ -85,9 +112,9 @@ if "user" not in st.session_state or st.session_state.user is None:
             st.rerun()
 
 # ==============================================================================
-# 2. FLUXO: USUÁRIO NÃO AUTENTICADO (TELA DE LOGIN)
+# 2. RENDERIZAÇÃO DA TELA DE LOGIN (SEM BARRA LATERAL)
 # ==============================================================================
-if "user" not in st.session_state or st.session_state.user is None:
+def render_login_view():
     col_l, col_center, col_r = st.columns([1, 1.8, 1])
     with col_center:
         st.write("")
@@ -119,13 +146,17 @@ if "user" not in st.session_state or st.session_state.user is None:
                     else:
                         user = login_user(username_input, password_input)
                         if user:
-                            # Salva os dados na sessão
+                            # Salva os dados na sessão e remove flag de logout
+                            st.session_state["logged_out"] = False
                             st.session_state["user"] = user.to_dict()
                             
                             # Gera o token JWT e salva no cookie (7 dias de expiração)
                             token = create_token(user.username, expires_in_days=7)
                             expires_date = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(days=7)
-                            cookie_manager.set("auth_token", token, expires_at=expires_date, key="set_login_token")
+                            try:
+                                cookie_manager.set("auth_token", token, expires_at=expires_date, key="set_login_token")
+                            except Exception:
+                                pass
                             
                             st.success(f"Bem-vindo(a), {user.name or user.username}!")
                             st.rerun()
@@ -133,6 +164,11 @@ if "user" not in st.session_state or st.session_state.user is None:
                             st.error("Credenciais inválidas. Verifique seu usuário e senha.")
                             
         st.caption("PPGRHS | Centro de Tecnologia — Versão Dev.02.06-2026")
+
+if "user" not in st.session_state or st.session_state.user is None:
+    # Renderiza apenas a tela de login com a barra lateral totalmente oculta
+    pg_login = st.navigation([st.Page(render_login_view, title="Login", icon="🔒")], position="hidden")
+    pg_login.run()
     st.stop()
 
 # ==============================================================================
@@ -146,16 +182,21 @@ with st.sidebar:
     st.markdown(f"**Operador:** {logged_user.get('name') or logged_user.get('username')}")
     
     if st.button("🚪 Sair", use_container_width=True, key="btn_logout_sidebar"):
-        cookie_manager.delete("auth_token", key="logout_token_del")
-        st.session_state.clear()
+        st.session_state["logged_out"] = True
+        st.session_state["user"] = None
+        try:
+            cookie_manager.delete("auth_token")
+        except Exception:
+            pass
+        for k in list(st.session_state.keys()):
+            if k not in ["satellitum_auth_cookie_manager", "logged_out"]:
+                try:
+                    del st.session_state[k]
+                except Exception:
+                    pass
         st.rerun()
         
     st.markdown("---")
-
-
-
-
-
 
 # Montagem do Dicionário de Páginas Baseado em Permissões
 pages_dict = {}
@@ -190,5 +231,5 @@ if not pages_dict:
     st.stop()
 
 # Inicializa e executa o sistema de navegação do Streamlit
-pg = st.navigation(pages_dict)
+pg = st.navigation(pages_dict, position="sidebar")
 pg.run()

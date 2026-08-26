@@ -6,11 +6,16 @@ import streamlit as st
 def init_gee():
     """Inicializa a conexão com o Google Earth Engine apenas uma vez por sessão."""
     try:
-        project = os.getenv("EARTHENGINE_PROJECT", "ppgrhs")
-        ee.Initialize(project=project)
+        from modules.google_auth import carregar_credenciais_google
+        project = os.getenv("EARTHENGINE_PROJECT") or os.getenv("GOOGLE_PROJECT_ID", "ppgrhs-satellitum")
+        creds = carregar_credenciais_google()
+        ee.Initialize(credentials=creds, project=project)
         return True
     except Exception as e:
-        st.error(f"Erro ao inicializar o Earth Engine: {e}. Verifique as credenciais.")
+        try:
+            st.error(f"Erro ao inicializar o Earth Engine: {e}. Verifique as credenciais.")
+        except Exception:
+            pass
         return False
 
 def preprocess_1(image):
@@ -55,7 +60,10 @@ def preprocess_2(image, bands, CRS_original, pixel_size, ROI):
 def buscar_metadados_gee(date_start, date_end, pixel_size: int) -> list:
     """Realiza a consulta da coleção Sentinel-2 L2A no Earth Engine e retorna a lista formatada de metadados extraídos."""
     if not init_gee():
-        st.error("Erro ao inicializar o Earth Engine.")
+        try:
+            st.error("Erro ao inicializar o Earth Engine.")
+        except Exception:
+            pass
         return []
 
     # Geometria da ROI pré-definida no projeto

@@ -4,36 +4,46 @@ import io
 import streamlit as st
 
 def obter_caminho_token() -> str:
-    """Retorna o caminho rígido do arquivo JSON de credenciais na pasta .streamlit da raiz do projeto."""
+    """Retorna o caminho do arquivo JSON de credenciais da Service Account para o Google Drive."""
+    env_path = os.getenv("GDRIVE_SERVICE_ACCOUNT_KEY_FILE") or os.getenv("GEE_SERVICE_ACCOUNT_KEY_FILE")
+    if env_path and os.path.exists(env_path):
+        return os.path.abspath(env_path)
+
     module_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(module_dir)
     streamlit_dir = os.path.join(project_root, ".streamlit")
     
-    if not os.path.exists(streamlit_dir):
-        raise FileNotFoundError(f"Diretório '.streamlit' não encontrado na raiz do projeto ({project_root}).")
-        
-    json_files = [f for f in os.listdir(streamlit_dir) if f.endswith('.json')]
-    if not json_files:
-        raise FileNotFoundError("Nenhum arquivo JSON de credenciais encontrado em '.streamlit'.")
-        
-    json_files.sort()
-    return os.path.join(streamlit_dir, json_files[0])
+    candidatos = [
+        os.path.join(streamlit_dir, "token.json"),
+        os.path.join(streamlit_dir, "credentials"),
+        os.path.join(streamlit_dir, "SA.json"),
+        os.path.join(".streamlit", "token.json"),
+        os.path.join(".streamlit", "credentials"),
+        os.path.join(".streamlit", "SA.json"),
+        "/app/.streamlit/token.json",
+        "/app/.streamlit/credentials",
+        "/app/.streamlit/SA.json"
+    ]
+    for c in candidatos:
+        if os.path.exists(c):
+            return os.path.abspath(c)
+            
+    if os.path.exists(streamlit_dir):
+        json_files = [f for f in os.listdir(streamlit_dir) if f.endswith('.json')]
+        if json_files:
+            json_files.sort()
+            return os.path.join(streamlit_dir, json_files[0])
+            
+    raise FileNotFoundError("Nenhum arquivo JSON de credenciais encontrado em '.streamlit'.")
 
 @st.cache_resource
 def obter_servico_gdrive():
     """Retorna uma instância de cliente do Google Drive API (v3) autenticada com o token JSON."""
     try:
-        from google.oauth2 import service_account
         from googleapiclient.discovery import build
+        from modules.google_auth import carregar_credenciais_google
         
-        json_path = obter_caminho_token()
-        scopes = ['https://www.googleapis.com/auth/drive']
-        
-        credentials = service_account.Credentials.from_service_account_file(
-            json_path,
-            scopes=scopes
-        )
-        
+        credentials = carregar_credenciais_google()
         service = build('drive', 'v3', credentials=credentials)
         return service
     except Exception as e:

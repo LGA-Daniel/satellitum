@@ -4,11 +4,9 @@ services:
     container_name: satellitum_db
     restart: always
     environment:
-      POSTGRES_USER: administrador
-      POSTGRES_PASSWORD: 202606
-      POSTGRES_DB: satellitum
-    ports:
-      - "5433:5432"
+      POSTGRES_USER: ${POSTGRES_USER:-administrador}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD no .env}
+      POSTGRES_DB: ${POSTGRES_DB:-satellitum}
     volumes:
       - pg_data:/var/lib/postgresql/data
       - ./init.sql:/docker-entrypoint-initdb.d/init.sql
@@ -20,17 +18,22 @@ services:
     container_name: satellitum_core
     restart: always
     ports:
-      - "8503:8501"
+      - "${APP_PORT:-8502}:8501"
     volumes:
       - .:/app
-      - ~/.config/earthengine:/root/.config/earthengine
-      - /storage/datasets:/data/datasets
+      - ./.streamlit/credentials:/root/.config/earthengine/credentials
+      - ${DATASETS_DIR:-/storage/datasets}:/data/datasets
     environment:
-      - DB_HOST=satellitum_db
-      - DB_NAME=satellitum
-      - DB_USER=administrador
-      - DB_PASS=202606
-      - EARTHENGINE_PROJECT=ppgrhs
+      - DB_HOST=${DB_HOST:-satellitum_db}
+      - DB_NAME=${POSTGRES_DB:-satellitum}
+      - DB_USER=${POSTGRES_USER:-administrador}
+      - DB_PASS=${POSTGRES_PASSWORD}
+      - GOOGLE_PROJECT_ID=${GOOGLE_PROJECT_ID:-ppgrhs-satellitum}
+      - EARTHENGINE_PROJECT=${EARTHENGINE_PROJECT:-ppgrhs-satellitum}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - APP_URL=${APP_URL:-http://localhost:8502}
+      - ADMIN_INITIAL_PASSWORD=${ADMIN_INITIAL_PASSWORD:-admin123}
     depends_on:
       - satellitum_db
     networks:
@@ -43,34 +46,42 @@ services:
     entrypoint: [ "python3", "-m", "modules.worker" ]
     volumes:
       - .:/app
-      - ~/.config/earthengine:/root/.config/earthengine
-      - /storage/datasets:/data/datasets
+      - ./.streamlit/credentials:/root/.config/earthengine/credentials
+      - ${DATASETS_DIR:-/storage/datasets}:/data/datasets
     environment:
-      - DB_HOST=satellitum_db
-      - DB_NAME=satellitum
-      - DB_USER=administrador
-      - DB_PASS=202606
-      - EARTHENGINE_PROJECT=ppgrhs
+      - DB_HOST=${DB_HOST:-satellitum_db}
+      - DB_NAME=${POSTGRES_DB:-satellitum}
+      - DB_USER=${POSTGRES_USER:-administrador}
+      - DB_PASS=${POSTGRES_PASSWORD}
+      - GOOGLE_PROJECT_ID=${GOOGLE_PROJECT_ID:-ppgrhs-satellitum}
+      - EARTHENGINE_PROJECT=${EARTHENGINE_PROJECT:-ppgrhs-satellitum}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - APP_URL=${APP_URL:-http://localhost:8502}
     depends_on:
       - satellitum_db
     networks:
       - satellitum_network
 
-#  satellitum_pgadmin:
-#    image: dpage/pgadmin4
-#    container_name: satellitum_pgadmin
-#    restart: always
-#    environment:
-#      PGADMIN_DEFAULT_EMAIL: admin@admin.com
-#      PGADMIN_DEFAULT_PASSWORD: admin
-#    ports:
-#      - "5050:80"
-#    volumes:
-#      - pgadmin_data:/var/lib/pgadmin
-#    depends_on:
-#      - satellitum_db
-#    networks:
-#      - satellitum_network
+  # pgAdmin ativado opcionalmente via profile 'tools' ou executado sob demanda.
+  # Quando ativo, responde exclusivamente no loopback local (127.0.0.1) com credenciais do .env
+  satellitum_pgadmin:
+    image: dpage/pgadmin4
+    container_name: satellitum_pgadmin
+    restart: always
+    profiles:
+      - tools
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@satellitum.local}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:?Defina PGADMIN_DEFAULT_PASSWORD no .env}
+    ports:
+      - "127.0.0.1:${PGADMIN_PORT:-5050}:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      - satellitum_db
+    networks:
+      - satellitum_network
 
 networks:
   satellitum_network:

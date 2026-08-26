@@ -7,3 +7,5 @@ pandas>=2.0.0
 openpyxl>=3.1.0
 PyJWT>=2.8.0
 extra-streamlit-components>=0.1.71
+google-auth-oauthlib>=1.0.0
+google-api-python-client>=2.0.0
