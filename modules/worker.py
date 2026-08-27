@@ -362,7 +362,7 @@ def _executar_gee_export(tarefa_id: int, payload: dict):
 
 def _executar_csv_ingest(tarefa_id: int, payload: dict):
     """Executa o download de arquivos CSV do Drive e ingestão em massa no PostgreSQL."""
-    _adicionar_log_db(tarefa_id, "Inicializando conexão com o Google Drive...")
+    _adicionar_log_db(tarefa_id, "Conexão com o repositório estabelecida")
     service = obter_servico_gdrive()
     if not service:
         _adicionar_log_db(tarefa_id, "[ERRO] Não foi possível autenticar no Google Drive. Abortando tarefa.")
@@ -460,7 +460,7 @@ def _executar_csv_ingest(tarefa_id: int, payload: dict):
                 
         # B. Leitura e ingestão rápida (COPY)
         if os.path.exists(dest_path):
-            _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] Estruturando pixels na memória...")
+            _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] Estruturando dados para sincronização...")
             try:
                 try:
                     df = pd.read_csv(dest_path)

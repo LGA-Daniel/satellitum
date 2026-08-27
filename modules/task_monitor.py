@@ -111,3 +111,25 @@ def render_conteudo_monitoramento_tarefa(tarefa_id: int, live_polling: bool = Tr
             use_container_width=True,
             key=f"btn_download_log_shared_{tarefa_id}"
         )
+
+def on_dismiss_tarefa_callback():
+    tid = st.session_state.get("tarefa_id_monitorada")
+    if tid:
+        st.session_state[f"tarefa_dismissed_{tid}"] = True
+    st.session_state["tarefa_id_monitorada"] = None
+
+def monitorar_tarefa_dialog(tid: int, titulo: str = "Processamento"):
+    import inspect
+    sig_dialog = inspect.signature(st.dialog)
+    dialog_kwargs = {"width": "large"} if "width" in sig_dialog.parameters else {}
+    
+    if 'on_dismiss' in sig_dialog.parameters:
+        @st.dialog(titulo, on_dismiss=on_dismiss_tarefa_callback, **dialog_kwargs)
+        def _inner(t_id):
+            render_conteudo_monitoramento_tarefa(t_id, live_polling=True, show_download_log=False)
+        _inner(tid)
+    else:
+        @st.dialog(titulo, dismissible=True, **dialog_kwargs)
+        def _inner(t_id):
+            render_conteudo_monitoramento_tarefa(t_id, live_polling=True, show_download_log=False)
+        _inner(tid)
