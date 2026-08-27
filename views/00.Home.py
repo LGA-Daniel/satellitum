@@ -8,6 +8,4 @@ st.subheader("Sistema de Processamento e Armazenamento de Produtos Orbitais")
 
 st.divider()
 
-st.caption("Centro de Tecnologia")
-st.caption("Programa de Pós-Graduação em Recursos Hídricos e Saneamento")
-st.caption("Versão: Dev.02.06-2026")
+st.caption("FlowBR | PPGRHS | Centro de Tecnologia — Versão Dev.26.08.2026")

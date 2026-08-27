@@ -50,9 +50,9 @@ def obter_servico_gdrive():
         st.error(f"Erro ao inicializar o cliente do Google Drive: {e}")
         return None
 
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=10)
 def listar_arquivos_pasta_drive(folder_name: str = 'CSV_Sentinel2') -> list:
-    """Lista todos os arquivos dentro de uma pasta específica no Google Drive com lógica de retentativas."""
+    """Lista todos os arquivos dentro de uma pasta específica ou com prefixo CELMM no Google Drive com lógica de retentativas."""
     retries = 3
     delay = 1
     
@@ -66,33 +66,63 @@ def listar_arquivos_pasta_drive(folder_name: str = 'CSV_Sentinel2') -> list:
             continue
             
         try:
+            all_files = []
+            
+            # 1. Busca por pastas com o nome especificado (ex: CSV_Sentinel2)
             query_folder = f"name = '{folder_name}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
-            response_folder = service.files().list(q=query_folder, fields="files(id, name)").execute()
+            response_folder = service.files().list(
+                q=query_folder,
+                fields="files(id, name, parents)",
+                pageSize=50,
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True
+            ).execute()
             folders = response_folder.get('files', [])
             
-            if not folders:
-                return []
+            # Se encontrar pastas, busca os arquivos dentro delas
+            if folders:
+                folders.sort(key=lambda f: 0 if 'root' in f.get('parents', []) else 1)
+                folder_ids = [f['id'] for f in folders]
                 
-            folder_ids = [f['id'] for f in folders]
-            all_files = []
-            for fid in folder_ids:
-                query_files = f"'{fid}' in parents and trashed = false"
+                for fid in folder_ids:
+                    query_files = f"'{fid}' in parents and trashed = false"
+                    page_token = None
+                    while True:
+                        response_files = service.files().list(
+                            q=query_files,
+                            fields="nextPageToken, files(id, name, mimeType, size, createdTime)",
+                            pageSize=1000,
+                            pageToken=page_token,
+                            supportsAllDrives=True,
+                            includeItemsFromAllDrives=True
+                        ).execute()
+                        all_files.extend(response_files.get('files', []))
+                        page_token = response_files.get('nextPageToken')
+                        if not page_token:
+                            break
+
+            # 2. Fallback: Se não encontrou arquivos na pasta, busca diretamente arquivos CELMM_Data_ no Drive
+            if not all_files:
+                query_fallback = "name contains 'CELMM_Data_' and mimeType != 'application/vnd.google-apps.folder' and trashed = false"
                 page_token = None
                 while True:
-                    response_files = service.files().list(
-                        q=query_files,
+                    response_fallback = service.files().list(
+                        q=query_fallback,
                         fields="nextPageToken, files(id, name, mimeType, size, createdTime)",
-                        pageToken=page_token
+                        pageSize=1000,
+                        pageToken=page_token,
+                        supportsAllDrives=True,
+                        includeItemsFromAllDrives=True
                     ).execute()
-                    all_files.extend(response_files.get('files', []))
-                    page_token = response_files.get('nextPageToken')
+                    all_files.extend(response_fallback.get('files', []))
+                    page_token = response_fallback.get('nextPageToken')
                     if not page_token:
                         break
                         
             return all_files
         except Exception as e:
             if attempt == retries - 1:
-                st.error(f"Erro ao listar arquivos da pasta '{folder_name}' no Google Drive após {retries} tentativas: {e}")
+                st.error(f"Erro ao listar arquivos do Google Drive após {retries} tentativas: {e}")
                 return []
             else:
                 time.sleep(delay)

@@ -67,7 +67,7 @@ def buscar_metadados_gee(date_start, date_end, pixel_size: int) -> list:
         return []
 
     # Geometria da ROI pré-definida no projeto
-    table = ee.FeatureCollection("projects/ppgrhs/assets/celmm")
+    table = ee.FeatureCollection("projects/ppgrhs/assets/CELMM_2025_AJUSTADO")
     ROI = table.geometry()
     
     bands = ['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B8A', 'B9', 'B11', 'B12']

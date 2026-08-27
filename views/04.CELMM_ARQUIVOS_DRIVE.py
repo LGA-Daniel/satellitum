@@ -29,8 +29,11 @@ with st.spinner("Buscando Arquivos"):
     arquivos_drive = listar_arquivos_pasta_drive("CSV_Sentinel2")
     ids_com_pixels = obter_ids_imagens_com_pixels()
 
-# Cria um set dos nomes dos arquivos no Drive para busca rápida O(1)
-nomes_arquivos_drive = {arq.get('name') for arq in arquivos_drive if arq.get('name')}
+# Cria mapeamentos e sets dos nomes dos arquivos no Drive para busca rápida O(1)
+map_nome_id = {arq.get('name', '').strip(): arq.get('id') for arq in arquivos_drive if arq.get('name') and arq.get('id')}
+map_nome_id_lower = {arq.get('name', '').strip().lower(): arq.get('id') for arq in arquivos_drive if arq.get('name') and arq.get('id')}
+nomes_arquivos_drive = set(map_nome_id.keys())
+nomes_arquivos_drive_lower = set(map_nome_id_lower.keys())
 
 # Define a pasta temporária para armazenar os arquivos CSV fisicamente no servidor
 module_dir = os.path.dirname(os.path.abspath(__file__))
@@ -55,6 +58,7 @@ if 'reset_counter' not in st.session_state:
 def limpar_filtros_callback():
     st.session_state['reset_counter'] += 1
     resetar_estado_processamento()
+    listar_arquivos_pasta_drive.clear()
 
 def on_dismiss_csv_callback():
     if "tarefa_id_monitorada" in st.session_state:
@@ -84,7 +88,7 @@ def baixar_arquivos_conteudo(valid_selected, map_nome_id):
                 # Converte a data para string YYYY-MM-DD
                 date_str = row["Data do Produto"].strftime('%Y-%m-%d') if isinstance(row["Data do Produto"], (datetime.date, datetime.datetime)) else str(row["Data do Produto"])
                 nome_esperado = f"CELMM_Data_{date_str}_{int(row['Tamanho Pixel (m)'])}m.csv"
-                fid = map_nome_id.get(nome_esperado)
+                fid = map_nome_id.get(nome_esperado) or map_nome_id_lower.get(nome_esperado.lower())
                 if fid:
                     dest_path = os.path.join(temp_dir, nome_esperado)
                     # Download streaming direto para disco
@@ -153,64 +157,89 @@ def processar_csv_conteudo(tarefa_id):
         return
 
     status = t["status"]
-    processados = t["itens_processados"]
-    total = t["total_itens"]
-    logs = t["logs"] or ""
+    
+    # Placeholders para isolar a atualização de dados dos botões
+    conteudo_placeholder = st.empty()
+    botoes_container = st.container()
 
-    # Exibe título e progresso
-    if status == "pendente":
-        st.info("Tarefa aguardando na fila de execução...")
-        st.progress(0.0)
-    elif status == "processando":
-        pct = processados / total if total > 0 else 0.0
-        st.progress(pct, text=f"Processando CSVs: {processados}/{total} arquivos ({int(pct*100)}%)")
-    elif status == "concluido":
-        st.success("Sincronização concluída com sucesso!")
-        st.progress(1.0)
-    elif status == "cancelado":
-        st.warning("Processamento cancelado pelo usuário.")
-        st.progress(processados / total if total > 0 else 0.0)
-    else:
-        st.error("A sincronização falhou.")
-        st.progress(processados / total if total > 0 else 0.0)
+    def render_status_logs(target_ph, tarefa_dict):
+        st_status = tarefa_dict["status"]
+        st_proc = tarefa_dict["itens_processados"]
+        st_tot = tarefa_dict["total_itens"]
+        st_logs = tarefa_dict["logs"] or ""
+        pct = st_proc / st_tot if st_tot > 0 else 0.0
 
-    st.subheader("Logs de Ingestão")
-    st.code(logs)
+        with target_ph.container():
+            if st_status == "pendente":
+                st.info("Tarefa aguardando na fila de execução...")
+                st.progress(0.0)
+            elif st_status == "processando":
+                st.progress(pct, text=f"Processando CSVs: {st_proc}/{st_tot} arquivos ({int(pct*100)}%)")
+            elif st_status == "concluido":
+                st.success("Sincronização concluída com sucesso!")
+                st.progress(1.0)
+            elif st_status == "cancelado":
+                st.warning("Processamento cancelado pelo usuário.")
+                st.progress(pct)
+            else:
+                st.error("A sincronização falhou.")
+                st.progress(pct)
 
-    # Botões de ação baseados no status
+            st.subheader("Logs de Ingestão")
+            st.code(st_logs)
+
+    # Renderiza estado inicial
+    render_status_logs(conteudo_placeholder, t)
+
+    # Botões e fluxo baseados no status
     if status in ["pendente", "processando"]:
-        col_btn1, col_btn2 = st.columns(2)
-        with col_btn1:
-            if st.button("Cancelar Processamento", type="secondary", use_container_width=True, key=f"btn_cancel_csv_{tarefa_id}"):
-                cancelar_tarefa(tarefa_id)
-                st.toast("Cancelamento solicitado.")
+        with botoes_container:
+            col_btn1, col_btn2 = st.columns(2)
+            with col_btn1:
+                btn_cancelar = st.button("Cancelar Processamento", type="secondary", use_container_width=True, key=f"btn_cancel_csv_{tarefa_id}")
+            with col_btn2:
+                btn_fechar = st.button("Esconder Progresso", type="primary", use_container_width=True, key=f"btn_hide_csv_{tarefa_id}")
+
+        if btn_cancelar:
+            cancelar_tarefa(tarefa_id)
+            st.toast("Cancelamento solicitado.")
+            st.rerun()
+
+        if btn_fechar:
+            st.session_state[f"tarefa_dismissed_{tarefa_id}"] = True
+            if "tarefa_id_monitorada" in st.session_state:
+                del st.session_state["tarefa_id_monitorada"]
+            st.rerun()
+
+        # Polling leve para atualizar progresso e logs em tempo real sem recarregar a página toda e sem duplicar botões
+        while status in ["pendente", "processando"]:
+            time.sleep(1.5)
+            t_atual = obter_status_tarefa(tarefa_id)
+            if not t_atual:
+                break
+            status = t_atual["status"]
+            render_status_logs(conteudo_placeholder, t_atual)
+            if status not in ["pendente", "processando"]:
                 st.rerun()
-        with col_btn2:
-            if st.button("Esconder Progresso", type="primary", use_container_width=True, key=f"btn_hide_csv_{tarefa_id}"):
-                st.session_state[f"tarefa_dismissed_{tarefa_id}"] = True
-                if "tarefa_id_monitorada" in st.session_state:
-                    del st.session_state["tarefa_id_monitorada"]
-                st.rerun()
-        # Atualização automática da modal
-        time.sleep(2)
-        st.rerun()
     else:
-        col_c1, col_c2 = st.columns(2)
-        with col_c1:
-            st.download_button(
-                label="Baixar Logs (.txt)",
-                data=logs,
-                file_name=f"log_ingestao_tarefa_{tarefa_id}_{datetime.date.today()}.txt",
-                mime="text/plain",
-                use_container_width=True,
-                key=f"btn_download_logs_csv_{tarefa_id}"
-            )
-        with col_c2:
-            if st.button("Fechar", type="primary", use_container_width=True, key=f"btn_close_csv_{tarefa_id}"):
-                if "tarefa_id_monitorada" in st.session_state:
-                    st.session_state[f"tarefa_dismissed_{st.session_state['tarefa_id_monitorada']}"] = True
-                    del st.session_state["tarefa_id_monitorada"]
-                st.rerun()
+        logs = t["logs"] or ""
+        with botoes_container:
+            col_c1, col_c2 = st.columns(2)
+            with col_c1:
+                st.download_button(
+                    label="Baixar Logs (.txt)",
+                    data=logs,
+                    file_name=f"log_ingestao_tarefa_{tarefa_id}_{datetime.date.today()}.txt",
+                    mime="text/plain",
+                    use_container_width=True,
+                    key=f"btn_download_logs_csv_{tarefa_id}"
+                )
+            with col_c2:
+                if st.button("Fechar", type="primary", use_container_width=True, key=f"btn_close_csv_{tarefa_id}"):
+                    if "tarefa_id_monitorada" in st.session_state:
+                        st.session_state[f"tarefa_dismissed_{st.session_state['tarefa_id_monitorada']}"] = True
+                        del st.session_state["tarefa_id_monitorada"]
+                    st.rerun()
 
 if hasattr(st, "dialog"):
     sig = inspect.signature(st.dialog)
@@ -249,7 +278,9 @@ else:
     # Adiciona a coluna de status correlacionando os registros com o set do Drive previamente
     def verificar_disponibilidade(row):
         nome_esperado = f"CELMM_Data_{row['data'].strftime('%Y-%m-%d')}_{int(row['tamanho_pixel'])}m.csv"
-        return "Disponível ✅" if nome_esperado in nomes_arquivos_drive else "Não Encontrado ❌"
+        if nome_esperado in nomes_arquivos_drive or nome_esperado.lower() in nomes_arquivos_drive_lower:
+            return "Disponível ✅"
+        return "Não Encontrado ❌"
         
     df['Status no Drive'] = df.apply(verificar_disponibilidade, axis=1)
     df['Importado para o Banco'] = df.apply(
