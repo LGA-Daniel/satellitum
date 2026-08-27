@@ -44,23 +44,9 @@ AVAILABLE_VIEWS = [
         "category": "Processamento & Metadados",
         "views": [
             {
-                "name": "CELMM - Explorar Metadados",
-                "path": "views/02.CELMM_VISUALIZAR_METADADOS.py",
-                "icon": "🔍",
-                "url_path": None,
-                "default": True
-            },
-            {
-                "name": "CELMM - Processar Produtos (CSV | GDRIVE)",
-                "path": "views/03.CELMM_BAIXAR_IMAGENS.py",
-                "icon": "⚡",
-                "url_path": None,
-                "default": True
-            },
-            {
-                "name": "CELMM - Sincronizar Produtos",
-                "path": "views/04.CELMM_ARQUIVOS_DRIVE.py",
-                "icon": "🔄",
+                "name": "CELMM | Gerenciamento de Produtos Orbitais",
+                "path": "views/08.CELMM_GESTAO_PRODUTOS.py",
+                "icon": "🛰️",
                 "url_path": None,
                 "default": True
             }
@@ -96,20 +82,12 @@ AVAILABLE_VIEWS = [
         "category": "Administração do Sistema",
         "views": [
             {
-                "name": "Configurações do Sistema",
+                "name": "Administração do Sistema",
                 "path": "views/99.Manutencao.py",
                 "icon": "⚙️",
-                "url_path": None,
-                "default": True
-            },
-            {
-                "name": "Gestão de Usuários",
-                "path": "views/98.Admin_Users.py",
-                "icon": "👥",
-                "url_path": "admin_users",
+                "url_path": "administracao",
                 "default": True
             }
-
         ]
     }
 ]

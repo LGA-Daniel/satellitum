@@ -8,7 +8,8 @@ import pandas as pd
 from modules.db import (
     SessionLocal, 
     salvar_pixels_bulk,
-    obter_metadados_salvos
+    obter_metadados_salvos,
+    marcar_imagem_sem_pixels_processada
 )
 from modules.api_gee import init_gee
 from modules.api_gdrive import (
@@ -151,6 +152,8 @@ def _worker_loop():
                     _executar_gee_export(tarefa_id, payload)
                 elif tipo == "CSV_INGEST":
                     _executar_csv_ingest(tarefa_id, payload)
+                elif tipo == "FULL_PIPELINE":
+                    _executar_full_pipeline(tarefa_id, payload)
                 else:
                     _adicionar_log_db(tarefa_id, f"[ERRO] Tipo de tarefa desconhecido: {tipo}")
                     _atualizar_progresso_db(tarefa_id, 0, "falhou")
@@ -174,7 +177,7 @@ def _worker_loop():
 def _executar_gee_export(tarefa_id: int, payload: dict):
     """Executa o processamento do Earth Engine e exportação assíncrona para o Drive."""
     current_thread = threading.current_thread()
-    _adicionar_log_db(tarefa_id, "Inicializando o Google Earth Engine...")
+    _adicionar_log_db(tarefa_id, "Inicializando o Earth Engine (GEE)...")
     if not init_gee():
         _adicionar_log_db(tarefa_id, "[ERRO] Falha ao inicializar o Earth Engine. Abortando tarefa.")
         _atualizar_progresso_db(tarefa_id, 0, "falhou")
@@ -216,7 +219,7 @@ def _executar_gee_export(tarefa_id: int, payload: dict):
     success_count = 0
     fail_count = 0
     
-    _adicionar_log_db(tarefa_id, f"Iniciando processamento sequencial de {total} produtos no GEE.")
+    _adicionar_log_db(tarefa_id, f"Iniciando processamento no GEE para {total} produto(s)...")
     
     for index, rdata in enumerate(selected_rows):
         # 1. Verifica cancelamento
@@ -250,7 +253,7 @@ def _executar_gee_export(tarefa_id: int, payload: dict):
         grade = match.get('z_grade_mgrs')
         pixel_sz = int(match.get('tamanho_pixel'))
         
-        _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] Processando data: {date_str} | Satélite: {sat} | Grade: {grade} | Pixel: {pixel_sz}m")
+        _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] Produto: {date_str} | Satélite: {sat} | Grade: {grade} | Pixel: {pixel_sz}m")
         
         try:
             str_start = date_str
@@ -298,10 +301,10 @@ def _executar_gee_export(tarefa_id: int, payload: dict):
                 fileFormat='CSV'
             )
             
-            _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] Submetendo tarefa de exportação ao GEE...")
+            _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] Submetendo tarefa de processamento ao GEE...")
             task.start()
             task_id = task.status().get('id')
-            _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] Tarefa iniciada no GEE. ID: {task_id}")
+            _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] Tarefa em andamento no GEE (ID: {task_id})...")
             
             start_time = time.time()
             last_state = None
@@ -316,6 +319,7 @@ def _executar_gee_export(tarefa_id: int, payload: dict):
                     except:
                         pass
                     _adicionar_log_db(tarefa_id, "[CANCELADO] Processamento cancelado pelo usuário.")
+                    _atualizar_progresso_db(tarefa_id, success_count, "cancelado")
                     return
                 
                 # Verifica se a thread do worker foi solicitada a parar
@@ -329,12 +333,12 @@ def _executar_gee_export(tarefa_id: int, payload: dict):
                 elapsed = int(time.time() - start_time)
                 
                 if state != last_state:
-                    _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] Status GEE: {state} ({elapsed}s decorridos)")
+                    _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] Estado GEE: {state} ({elapsed}s)")
                     last_state = state
                     
                 if state in ['COMPLETED', 'FAILED', 'CANCELLED']:
                     if state == 'COMPLETED':
-                        _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] Sucesso! Exportação GEE concluída em {elapsed}s.")
+                        _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] Sucesso! Produto Processado em {elapsed}s.")
                         success_count += 1
                     else:
                         err_msg = status.get('error_message', 'Sem detalhes de erro.')
@@ -342,7 +346,7 @@ def _executar_gee_export(tarefa_id: int, payload: dict):
                         fail_count += 1
                     break
                     
-                time.sleep(5)
+                time.sleep(1.5)
                 
         except Exception as e:
             _adicionar_log_db(tarefa_id, f"[ERRO] [{index + 1}/{total}] Erro durante o processamento da data {date_str}: {e}")
@@ -351,7 +355,7 @@ def _executar_gee_export(tarefa_id: int, payload: dict):
         _atualizar_progresso_db(tarefa_id, success_count)
         
     _adicionar_log_db(tarefa_id, "--------------------------------------------------")
-    _adicionar_log_db(tarefa_id, f"Fim da fila. Sucesso: {success_count} | Falhas: {fail_count}")
+    _adicionar_log_db(tarefa_id, f"Fim da fila de processamento no GEE. Sucesso: {success_count} | Falhas: {fail_count}")
     
     final_status = "concluido" if fail_count == 0 else "falhou"
     _atualizar_progresso_db(tarefa_id, success_count, final_status)
@@ -385,12 +389,13 @@ def _executar_csv_ingest(tarefa_id: int, payload: dict):
         
     os.makedirs(temp_dir, exist_ok=True)
     
-    _adicionar_log_db(tarefa_id, f"Iniciando ingestão de {total} arquivo(s) CSV no PostgreSQL.")
+    _adicionar_log_db(tarefa_id, f"Iniciando sincronização de {total} produto(s) no Banco de Dados...")
     
     for index, rdata in enumerate(selected_rows):
         # 1. Verifica cancelamento
         if _verificar_cancelamento(tarefa_id):
-            _adicionar_log_db(tarefa_id, "[CANCELADO] Processamento cancelado pelo usuário.")
+            _adicionar_log_db(tarefa_id, "[CANCELADO] Sincronização cancelada pelo usuário.")
+            _atualizar_progresso_db(tarefa_id, success_count, "cancelado")
             return
 
         # 1b. Verifica se a thread do worker foi solicitada a parar
@@ -422,7 +427,8 @@ def _executar_csv_ingest(tarefa_id: int, payload: dict):
             db_sess.close()
 
         if pixels_validos_meta == 0:
-            _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] Produto com 0 pixels válidos. Ingestão vazia considerada sucesso.")
+            marcar_imagem_sem_pixels_processada(img_id, date_str, satelite, grade, pixel_size, zenital)
+            _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] Produto com 0 pixels válidos. Sincronização concluída.")
             success_count += 1
             _atualizar_progresso_db(tarefa_id, success_count)
             try:
@@ -432,34 +438,34 @@ def _executar_csv_ingest(tarefa_id: int, payload: dict):
                 pass
             continue
             
-        _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] Preparando arquivo: `{nome_esperado}`")
+        _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] Produto: `{nome_esperado}`")
         
         # A. Realiza download do GDrive se não estiver em disco local
         if not os.path.exists(dest_path):
             fid = map_nome_id.get(nome_esperado)
             if not fid:
-                _adicionar_log_db(tarefa_id, f"[ERRO] [{index + 1}/{total}] Arquivo `{nome_esperado}` não foi encontrado na pasta do Google Drive.")
+                _adicionar_log_db(tarefa_id, f"[ERRO] [{index + 1}/{total}] Arquivo `{nome_esperado}` não foi encontrado no repositório.")
                 fail_count += 1
                 _atualizar_progresso_db(tarefa_id, success_count)
                 continue
             
-            _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] Baixando arquivo do Google Drive...")
+            _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] Baixando produto do repositório...")
             try:
                 baixar_arquivo_drive_para_disco(fid, dest_path)
             except Exception as e:
-                _adicionar_log_db(tarefa_id, f"[ERRO] [{index + 1}/{total}] Falha no download do Drive: {e}")
+                _adicionar_log_db(tarefa_id, f"[ERRO] [{index + 1}/{total}] Falha ao baixar produto: {e}")
                 fail_count += 1
                 _atualizar_progresso_db(tarefa_id, success_count)
                 continue
                 
         # B. Leitura e ingestão rápida (COPY)
         if os.path.exists(dest_path):
-            _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] Lendo CSV e estruturando metadados na memória...")
+            _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] Estruturando pixels na memória...")
             try:
                 try:
                     df = pd.read_csv(dest_path)
                 except pd.errors.EmptyDataError:
-                    _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] Arquivo CSV vazio encontrado (0 pixels válidos). Ingestão concluída com sucesso.")
+                    _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] Produto vazio (0 pixels válidos). Sincronização concluída.")
                     try:
                         os.remove(dest_path)
                     except:
@@ -492,9 +498,9 @@ def _executar_csv_ingest(tarefa_id: int, payload: dict):
                     return str(val)
                 df['system_index'] = df['system_index'].apply(converter_system_index)
                 
-                _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] Iniciando inserção em massa (COPY) no banco...")
+                _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] Sincronizando Produto com o Banco de Dados...")
                 inseridos = salvar_pixels_bulk(df)
-                _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] Sucesso! {inseridos:,} pixels importados com sucesso.")
+                _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] Sucesso! {inseridos:,} pixels sincronizados no banco de dados.")
                 
                 # C. Remove arquivo temporário do disco
                 try:
@@ -505,14 +511,357 @@ def _executar_csv_ingest(tarefa_id: int, payload: dict):
                 success_count += 1
                 
             except Exception as e:
-                _adicionar_log_db(tarefa_id, f"[ERRO] [{index + 1}/{total}] Ingestão no banco falhou: {e}")
+                _adicionar_log_db(tarefa_id, f"[ERRO] [{index + 1}/{total}] Sincronização no banco falhou: {e}")
                 fail_count += 1
                 
         _atualizar_progresso_db(tarefa_id, success_count)
         
     _adicionar_log_db(tarefa_id, "--------------------------------------------------")
-    _adicionar_log_db(tarefa_id, f"Fim do processamento de CSVs. Sucesso: {success_count} | Falhas: {fail_count}")
+    _adicionar_log_db(tarefa_id, f"Fim da sincronização de produtos. Sucesso: {success_count} | Falhas: {fail_count}")
     
+    final_status = "concluido" if fail_count == 0 else "falhou"
+    _atualizar_progresso_db(tarefa_id, success_count, final_status)
+
+
+def _obter_id_arquivo_drive_especifico(nome_arquivo: str):
+    """Busca o file ID de um arquivo pelo nome exato dentro da pasta CSV_Sentinel2 no Google Drive."""
+    service = obter_servico_gdrive()
+    if not service:
+        return None
+    try:
+        q_pasta = "name = 'CSV_Sentinel2' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+        res_pasta = service.files().list(q=q_pasta, spaces='drive', fields='files(id, name)').execute()
+        pastas = res_pasta.get('files', [])
+        if not pastas:
+            return None
+        pasta_id = pastas[0]['id']
+        
+        q_arq = f"'{pasta_id}' in parents and (name = '{nome_arquivo}' or name = '{nome_arquivo.lower()}') and trashed = false"
+        res_arq = service.files().list(q=q_arq, spaces='drive', fields='files(id, name)').execute()
+        arquivos = res_arq.get('files', [])
+        if arquivos:
+            return arquivos[0]['id']
+        return None
+    except Exception as e:
+        print(f"Erro ao buscar arquivo no Drive: {e}")
+        return None
+
+
+def _executar_full_pipeline(tarefa_id: int, payload: dict):
+    """Executa de ponta a ponta o pipeline seriado: GEE -> Exportação para Drive -> Download -> Ingestão no PostgreSQL."""
+    current_thread = threading.current_thread()
+    _adicionar_log_db(tarefa_id, "Iniciando Processamento Automático (Processamento no GEE + Sincronização no Banco de Dados)...")
+    
+    if not init_gee():
+        _adicionar_log_db(tarefa_id, "[ERRO] Falha ao inicializar o Earth Engine (GEE). Abortando pipeline.")
+        _atualizar_progresso_db(tarefa_id, 0, "falhou")
+        return
+
+    service = obter_servico_gdrive()
+    if not service:
+        _adicionar_log_db(tarefa_id, "[ERRO] Falha ao conectar ao repositório Google Drive. Abortando pipeline.")
+        _atualizar_progresso_db(tarefa_id, 0, "falhou")
+        return
+
+    try:
+        ROI = ee.FeatureCollection("projects/ppgrhs/assets/CELMM_2025_AJUSTADO")
+    except Exception as e:
+        _adicionar_log_db(tarefa_id, f"[ERRO] Falha ao carregar a ROI CELMM no GEE: {e}")
+        _atualizar_progresso_db(tarefa_id, 0, "falhou")
+        return
+
+    def preprocess_1(image):
+        scl = image.select('SCL')
+        mask = (scl.neq(1)
+                .And(scl.neq(3))
+                .And(scl.neq(8))
+                .And(scl.neq(9))
+                .And(scl.neq(10)))
+        return image.updateMask(mask)
+
+    def preprocess_2(image, bands, CRS_original, pixel_size, ROI):
+        select_image = image.select(bands)
+        if pixel_size > 10:
+            CRS_target = CRS_original.atScale(pixel_size)
+            final_image = (select_image.setDefaultProjection(CRS_original)
+                           .reduceResolution(reducer=ee.Reducer.mean(), maxPixels=40000)
+                           .reproject(crs=CRS_target)
+                           .clip(ROI))
+        else:
+            final_image = select_image.clip(ROI)
+        return final_image
+
+    selected_rows = payload.get("selected_rows", [])
+    df_filtrado_data = payload.get("df_filtrado_data", [])
+    map_nome_id = payload.get("map_nome_id", {})
+    
+    total = len(selected_rows)
+    success_count = 0
+    fail_count = 0
+    
+    temp_dir = "/tmp/satellitum_temp"
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    _adicionar_log_db(tarefa_id, f"Iniciando esteira automática para {total} produto(s)...")
+    
+    for index, rdata in enumerate(selected_rows):
+        if _verificar_cancelamento(tarefa_id):
+            _adicionar_log_db(tarefa_id, "[CANCELADO] Processamento cancelado pelo usuário.")
+            return
+
+        if _stop_event.is_set() or getattr(current_thread, 'stop_requested', False):
+            _adicionar_log_db(tarefa_id, "[SISTEMA] Execução suspensa devido ao reinício da thread. A tarefa será retomada.")
+            _atualizar_progresso_db(tarefa_id, success_count, "pendente")
+            return
+
+        img_id = int(rdata.get('id', 0))
+        date_str = rdata.get('Data do Produto')
+        sat = str(rdata.get('Satélite'))
+        pixel_sz = int(rdata.get('Tamanho Pixel (m)', 20))
+        grade = rdata.get('Grade MGRS')
+        zenital = rdata.get('zenital')
+        pixels_validos = int(rdata.get('Pixels Válidos', 0))
+        
+        # Encontra nos metadados correspondentes caso algum campo esteja ausente
+        if not grade or not img_id or not pixel_sz:
+            for m in df_filtrado_data:
+                if m.get('data') == date_str and m.get('satelite') == sat:
+                    img_id = img_id or int(m.get('id', 0))
+                    grade = grade or m.get('z_grade_mgrs')
+                    pixel_sz = pixel_sz or int(m.get('tamanho_pixel', 20))
+                    zenital = zenital or m.get('zenital')
+                    break
+
+        nome_esperado = f"CELMM_Data_{date_str}_{pixel_sz}m.csv"
+        dest_path = os.path.join(temp_dir, nome_esperado)
+        
+        _adicionar_log_db(tarefa_id, "==================================================")
+        _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] PRODUTO: {date_str} | {sat} | Grade {grade} | {pixel_sz}m")
+        
+        # 1. Verifica se já está salvo no Banco de Dados (PostgreSQL)
+        ja_no_banco = False
+        if img_id:
+            db_sess = SessionLocal()
+            try:
+                from modules.models import CelmmPixels
+                ja_no_banco = db_sess.query(CelmmPixels.id).filter(CelmmPixels.metadados_imagem_id == img_id).first() is not None
+            except Exception as e:
+                print(f"Erro ao checar pixels no banco: {e}")
+            finally:
+                db_sess.close()
+
+        if ja_no_banco:
+            _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] [CONCLUÍDO] Produto já sincronizado no Banco de Dados. Nenhuma ação pendente.")
+            success_count += 1
+            _atualizar_progresso_db(tarefa_id, success_count)
+            continue
+
+        # 2. Se 0 pixels válidos
+        if pixels_validos == 0:
+            marcar_imagem_sem_pixels_processada(img_id, date_str, sat, grade, pixel_sz, zenital)
+            _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] Produto com 0 pixels válidos. Marcado como sincronizado.")
+            success_count += 1
+            _atualizar_progresso_db(tarefa_id, success_count)
+            continue
+            
+        # 3. ETAPA 1: Verificar se produto já está no repositório ou processar via GEE
+        file_drive_id = map_nome_id.get(nome_esperado) or _obter_id_arquivo_drive_especifico(nome_esperado)
+        
+        if not file_drive_id:
+            _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] [ETAPA 1/2: GEE] Produto pendente de processamento. Processando no Earth Engine...")
+            try:
+                date_obj = datetime.datetime.strptime(date_str, '%Y-%m-%d').date()
+                str_start = date_str
+                str_end = (date_obj + datetime.timedelta(days=1)).strftime('%Y-%m-%d')
+                
+                collection = (ee.ImageCollection("COPERNICUS/S2_SR_HARMONIZED")
+                              .filterBounds(ROI)
+                              .filterDate(str_start, str_end)
+                              .filter(ee.Filter.eq('MGRS_TILE', grade))
+                              .filter(ee.Filter.eq('SPACECRAFT_NAME', sat)))
+                
+                size = collection.size().getInfo()
+                if size == 0:
+                    _adicionar_log_db(tarefa_id, f"[ERRO] [{index + 1}/{total}] Imagem não encontrada no GEE.")
+                    fail_count += 1
+                    _atualizar_progresso_db(tarefa_id, success_count)
+                    continue
+                    
+                image = collection.first()
+                CRS_base = image.select('B4').projection()
+                img_with_SCL = preprocess_1(image)
+                bands = ['B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8', 'B8A', 'B9', 'B11', 'B12']
+                final_img = preprocess_2(img_with_SCL, bands, CRS_base, pixel_sz, ROI)
+                
+                image_for_extraction = final_img.addBands(ee.Image.pixelLonLat())
+                final_CRS = CRS_base.atScale(pixel_sz) if pixel_sz > 10 else CRS_base
+                
+                extracted_points = image_for_extraction.sample(
+                    region=ROI,
+                    scale=pixel_sz,
+                    projection=final_CRS,
+                    geometries=False,
+                    tileScale=4
+                )
+                
+                task_desc = f"Exportar_CSV_{date_str}_{pixel_sz}m"
+                file_prefix = f"CELMM_Data_{date_str}_{pixel_sz}m"
+                
+                task = ee.batch.Export.table.toDrive(
+                    collection=extracted_points,
+                    description=task_desc,
+                    folder='CSV_Sentinel2',
+                    fileNamePrefix=file_prefix,
+                    fileFormat='CSV'
+                )
+                
+                task.start()
+                task_id = task.status().get('id')
+                _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] [ETAPA 1/2: GEE] Tarefa em andamento no GEE (ID: {task_id}). Aguardando...")
+                
+                start_time = time.time()
+                last_state = None
+                gee_ok = False
+                
+                while True:
+                    if _verificar_cancelamento(tarefa_id):
+                        try:
+                            task.cancel()
+                        except:
+                            pass
+                        _adicionar_log_db(tarefa_id, "[CANCELADO] Processamento cancelado pelo usuário.")
+                        _atualizar_progresso_db(tarefa_id, success_count, "cancelado")
+                        return
+                        
+                    if _stop_event.is_set() or getattr(current_thread, 'stop_requested', False):
+                        _adicionar_log_db(tarefa_id, "[SISTEMA] Suspendendo execução para reinício da thread.")
+                        _atualizar_progresso_db(tarefa_id, success_count, "pendente")
+                        return
+                        
+                    status = task.status()
+                    state = status.get('state')
+                    elapsed = int(time.time() - start_time)
+                    
+                    if state != last_state:
+                        _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] [ETAPA 1/2: GEE] Estado: {state} ({elapsed}s)")
+                        last_state = state
+                        
+                    if state in ['COMPLETED', 'FAILED', 'CANCELLED']:
+                        if state == 'COMPLETED':
+                            _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] [ETAPA 1/2: GEE] Sucesso! Produto Processado em {elapsed}s.")
+                            gee_ok = True
+                        else:
+                            err_msg = status.get('error_message', 'Erro desconhecido.')
+                            _adicionar_log_db(tarefa_id, f"[ERRO] [{index + 1}/{total}] GEE falhou: {err_msg}")
+                        break
+                    time.sleep(1.5)
+                    
+                if not gee_ok:
+                    fail_count += 1
+                    _atualizar_progresso_db(tarefa_id, success_count)
+                    continue
+                    
+                # Aguarda propagação no repositório e localiza o arquivo
+                time.sleep(2)
+                file_drive_id = _obter_id_arquivo_drive_especifico(nome_esperado)
+                if not file_drive_id:
+                    time.sleep(3)
+                    file_drive_id = _obter_id_arquivo_drive_especifico(nome_esperado)
+
+            except Exception as e:
+                _adicionar_log_db(tarefa_id, f"[ERRO] [{index + 1}/{total}] Falha no processamento GEE: {e}")
+                fail_count += 1
+                _atualizar_progresso_db(tarefa_id, success_count)
+                continue
+        else:
+            _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] [ETAPA 1/2: GEE] Produto já disponível no repositório.")
+
+        # Verifica cancelamento antes da Etapa 2
+        if _verificar_cancelamento(tarefa_id):
+            _adicionar_log_db(tarefa_id, "[CANCELADO] Processamento cancelado pelo usuário antes da sincronização.")
+            _atualizar_progresso_db(tarefa_id, success_count, "cancelado")
+            return
+
+        # ETAPA 2: Ingestão do CSV no PostgreSQL
+        if not file_drive_id:
+            _adicionar_log_db(tarefa_id, f"[ERRO] [{index + 1}/{total}] Não foi possível localizar o arquivo `{nome_esperado}` no repositório.")
+            fail_count += 1
+            _atualizar_progresso_db(tarefa_id, success_count)
+            continue
+            
+        _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] [ETAPA 2/2: BANCO] Baixando `{nome_esperado}` para sincronização...")
+        try:
+            if os.path.exists(dest_path):
+                os.remove(dest_path)
+            baixar_arquivo_drive_para_disco(file_drive_id, dest_path)
+        except Exception as e:
+            _adicionar_log_db(tarefa_id, f"[ERRO] [{index + 1}/{total}] Falha ao baixar do repositório: {e}")
+            fail_count += 1
+            _atualizar_progresso_db(tarefa_id, success_count)
+            continue
+
+        if _verificar_cancelamento(tarefa_id):
+            _adicionar_log_db(tarefa_id, "[CANCELADO] Processamento cancelado pelo usuário.")
+            _atualizar_progresso_db(tarefa_id, success_count, "cancelado")
+            try:
+                if os.path.exists(dest_path):
+                    os.remove(dest_path)
+            except:
+                pass
+            return
+
+        if os.path.exists(dest_path):
+            _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] [ETAPA 2/2: BANCO] Sincronizando Produto com o Banco de Dados...")
+            try:
+                try:
+                    df = pd.read_csv(dest_path)
+                except pd.errors.EmptyDataError:
+                    _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] Produto sem linhas de pixels. Marcado como sincronizado.")
+                    try:
+                        os.remove(dest_path)
+                    except:
+                        pass
+                    success_count += 1
+                    _atualizar_progresso_db(tarefa_id, success_count)
+                    continue
+
+                rename_dict = {'system:index': 'system_index', '.geo': 'geo'}
+                df = df.rename(columns=rename_dict)
+                df['metadados_imagem_id'] = img_id
+                df['data'] = date_str
+                df['satelite'] = sat
+                df['z_grade_mgrs'] = grade
+                df['tamanho_pixel'] = pixel_sz
+                df['zenital'] = zenital
+                
+                def converter_system_index(val):
+                    if pd.isna(val):
+                        return ""
+                    if isinstance(val, float):
+                        if val.is_integer():
+                            return str(int(val))
+                        return str(val)
+                    return str(val)
+                df['system_index'] = df['system_index'].apply(converter_system_index)
+                
+                inseridos = salvar_pixels_bulk(df)
+                _adicionar_log_db(tarefa_id, f"[{index + 1}/{total}] [ETAPA 2/2: BANCO] Sucesso! {inseridos:,} pixels sincronizados no banco.")
+                try:
+                    os.remove(dest_path)
+                except:
+                    pass
+                success_count += 1
+            except Exception as e:
+                _adicionar_log_db(tarefa_id, f"[ERRO] [{index + 1}/{total}] Sincronização no banco falhou: {e}")
+                fail_count += 1
+        else:
+            _adicionar_log_db(tarefa_id, f"[ERRO] [{index + 1}/{total}] Arquivo CSV local não encontrado.")
+            fail_count += 1
+            
+        _atualizar_progresso_db(tarefa_id, success_count)
+
+    _adicionar_log_db(tarefa_id, "==================================================")
+    _adicionar_log_db(tarefa_id, f"Processamento Automático Finalizado. Sucesso: {success_count} | Falhas: {fail_count}")
     final_status = "concluido" if fail_count == 0 else "falhou"
     _atualizar_progresso_db(tarefa_id, success_count, final_status)
 

@@ -11,18 +11,19 @@ from modules.data_export import preparar_arquivo_exportacao
 
 def exportar_conteudo_modal(ids_imagens, tipo_formato):
     st.write(f"Iniciando a preparação do arquivo **{tipo_formato.upper()}**...")
-    with st.spinner("Processando dados e codificando arquivo..."):
+    with st.spinner("Processando dados e gravando arquivo no disco..."):
         try:
             cache = preparar_arquivo_exportacao(ids_imagens, tipo_formato)
-            st.success(f"Arquivo **{tipo_formato.upper()}** preparado com sucesso ({cache['total_rows']:,} linhas em {cache['elapsed']}s)!")
-            st.download_button(
-                label=f"Clique aqui para Baixar {tipo_formato.upper()}",
-                data=cache["file_data"],
-                file_name=f"CELMM_Export_{datetime.date.today()}.{cache['file_ext']}",
-                mime=cache["mime_type"],
-                type="primary",
-                use_container_width=True
-            )
+            st.success(f"Arquivo **{tipo_formato.upper()}** preparado com sucesso ({cache['total_rows']:,} linhas | {cache['file_size_mb']} MB em {cache['elapsed']}s)!")
+            with open(cache["file_path"], "rb") as f_dl:
+                st.download_button(
+                    label=f"Clique aqui para Baixar {tipo_formato.upper()} ({cache['file_size_mb']} MB)",
+                    data=f_dl,
+                    file_name=cache["file_name"],
+                    mime=cache["mime_type"],
+                    type="primary",
+                    use_container_width=True
+                )
         except Exception as e:
             st.error(f"Erro na preparação do download: {e}")
 

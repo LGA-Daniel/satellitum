@@ -1,4 +1,5 @@
 import os
+import datetime
 from typing import Optional
 import streamlit as st
 import pandas as pd
@@ -7,13 +8,14 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.dialects.postgresql import insert
 from modules.models import HistoricoExecucao, MetadadosImagens, CelmmPixels, BackgroundTask, User
 
-# Configurações do Banco de Dados
+# Configurações do Banco de Dados a partir do ambiente (.env)
 DB_HOST = os.getenv("DB_HOST", "satellitum_db")
-DB_NAME = os.getenv("DB_NAME", "satellitum")
-DB_USER = os.getenv("DB_USER", "administrador")
-DB_PASS = os.getenv("DB_PASS", "202606")
+DB_PORT = os.getenv("DB_PORT", "5432")
+DB_NAME = os.getenv("DB_NAME") or os.getenv("POSTGRES_DB", "satellitum")
+DB_USER = os.getenv("DB_USER") or os.getenv("POSTGRES_USER", "postgres")
+DB_PASS = os.getenv("DB_PASS") or os.getenv("POSTGRES_PASSWORD", "")
 
-DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASS}@{DB_HOST}:5432/{DB_NAME}"
+DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
 # Criação do Engine do SQLAlchemy com gerenciamento robusto do pool de conexões
 engine = create_engine(
@@ -188,6 +190,31 @@ def salvar_pixels_bulk(df_pixels) -> int:
     finally:
         db.close()
 
+def marcar_imagem_sem_pixels_processada(metadados_imagem_id: int, data: str, satelite: str, z_grade_mgrs: str, tamanho_pixel: int, zenital: float = None):
+    """Insere um registro marcador na tabela celmm_pixels para imagens com 0 pixels válidos que já passaram pelo pipeline de processamento."""
+    db = SessionLocal()
+    try:
+        existe = db.query(CelmmPixels.id).filter(
+            CelmmPixels.metadados_imagem_id == metadados_imagem_id
+        ).first()
+        if not existe:
+            pixel_vazio = CelmmPixels(
+                metadados_imagem_id=metadados_imagem_id,
+                system_index="EMPTY_0_PIXELS",
+                data=data,
+                satelite=satelite,
+                z_grade_mgrs=z_grade_mgrs,
+                tamanho_pixel=tamanho_pixel,
+                zenital=zenital
+            )
+            db.add(pixel_vazio)
+            db.commit()
+    except Exception as e:
+        db.rollback()
+        print(f"Erro ao marcar imagem com 0 pixels no banco: {e}")
+    finally:
+        db.close()
+
 def obter_ids_imagens_com_pixels() -> set:
     """Retorna um conjunto (set) de IDs de metadados_imagens que já possuem pixels associados na tabela celmm_pixels."""
     db = SessionLocal()
@@ -208,7 +235,10 @@ def obter_df_pixels_por_imagem_ids(imagem_ids: list, limit: int = None) -> pd.Da
         return pd.DataFrame()
     db = SessionLocal()
     try:
-        query = db.query(CelmmPixels).filter(CelmmPixels.metadados_imagem_id.in_(imagem_ids))
+        query = db.query(CelmmPixels).filter(
+            CelmmPixels.metadados_imagem_id.in_(imagem_ids),
+            CelmmPixels.system_index != "EMPTY_0_PIXELS"
+        )
         if limit is not None:
             query = query.limit(limit)
         df = pd.read_sql(query.statement, db.bind)
@@ -229,7 +259,7 @@ def obter_df_raster_cor_verdadeira_cached(metadados_imagem_id: int) -> pd.DataFr
         query = text("""
             SELECT latitude, longitude, "B4", "B3", "B2"
             FROM celmm_pixels
-            WHERE metadados_imagem_id = :img_id
+            WHERE metadados_imagem_id = :img_id AND system_index != 'EMPTY_0_PIXELS'
         """)
         with engine.connect() as conn:
             df = pd.read_sql(query, conn, params={"img_id": metadados_imagem_id})
@@ -246,7 +276,10 @@ def obter_df_pixels_por_imagem_ids_generator(imagem_ids: list, chunksize: int = 
         return
     db = SessionLocal()
     try:
-        query = db.query(CelmmPixels).filter(CelmmPixels.metadados_imagem_id.in_(imagem_ids))
+        query = db.query(CelmmPixels).filter(
+            CelmmPixels.metadados_imagem_id.in_(imagem_ids),
+            CelmmPixels.system_index != "EMPTY_0_PIXELS"
+        )
         for chunk in pd.read_sql(query.statement, db.bind, chunksize=chunksize):
             yield chunk
     except Exception as e:
@@ -259,13 +292,20 @@ def criar_tarefa_background(tipo_tarefa: str, payload_dict: dict, total_itens: i
     import json
     db = SessionLocal()
     try:
+        nome_op = {
+            "FULL_PIPELINE": "Processamento Automático",
+            "GEE_EXPORT": "Processamento no GEE",
+            "CSV_INGEST": "Sincronização de Produtos"
+        }.get(tipo_tarefa, tipo_tarefa)
+        
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         tarefa = BackgroundTask(
             tipo_tarefa=tipo_tarefa,
             status="pendente",
             total_itens=total_itens,
             itens_processados=0,
             payload=json.dumps(payload_dict),
-            logs=f"Tarefa criada. Tipo: {tipo_tarefa} | Itens a processar: {total_itens}\n"
+            logs=f"[{timestamp}] [INÍCIO] Tarefa criada: {nome_op} | Total de produto(s): {total_itens}\n"
         )
         db.add(tarefa)
         db.commit()
@@ -300,7 +340,8 @@ def cancelar_tarefa(tarefa_id: int):
         tarefa = db.query(BackgroundTask).filter(BackgroundTask.id == tarefa_id).first()
         if tarefa:
             tarefa.status = "cancelado"
-            tarefa.logs = (tarefa.logs or "") + "[SISTEMA] Solicitação de cancelamento recebida.\n"
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            tarefa.logs = (tarefa.logs or "") + f"[{timestamp}] [SISTEMA] Solicitação de cancelamento registrada pelo usuário.\n"
             db.commit()
     except Exception as e:
         db.rollback()
@@ -342,3 +383,97 @@ def obter_total_pixels() -> int:
         return 0
     finally:
         db.close()
+
+
+def obter_estatisticas_tamanho_banco() -> dict:
+    """Consulta métricas de tamanho total do banco de dados, detalhamento por tabela e contagem de registros."""
+    from sqlalchemy import text
+    try:
+        with engine.connect() as conn:
+            # Tamanho geral do banco
+            db_size_res = conn.execute(text("""
+                SELECT 
+                    current_database() AS db_name,
+                    pg_size_pretty(pg_database_size(current_database())) AS total_pretty,
+                    pg_database_size(current_database()) AS total_bytes;
+            """)).fetchone()
+            
+            # Detalhamento por tabela
+            tables_query = text("""
+                SELECT
+                    relname AS "Tabela",
+                    pg_size_pretty(pg_total_relation_size(c.oid)) AS "Tamanho Total",
+                    pg_size_pretty(pg_relation_size(c.oid)) AS "Tamanho Dados",
+                    pg_size_pretty(pg_indexes_size(c.oid)) AS "Tamanho Índices",
+                    reltuples::bigint AS "Linhas Estimadas",
+                    pg_total_relation_size(c.oid) AS bytes_total
+                FROM pg_class c
+                LEFT JOIN pg_namespace n ON (n.oid = c.relnamespace)
+                WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+                  AND c.relkind = 'r'
+                ORDER BY pg_total_relation_size(c.oid) DESC;
+            """)
+            df_tables = pd.read_sql(tables_query, conn)
+
+            # Contagens exatas de linhas
+            contagens = {}
+            for t in ["celmm_pixels", "metadados_imagens", "background_tasks", "users", "historico_execucao"]:
+                try:
+                    cnt = conn.execute(text(f"SELECT COUNT(*) FROM {t}")).scalar()
+                    contagens[t] = int(cnt) if cnt is not None else 0
+                except Exception:
+                    contagens[t] = 0
+
+            return {
+                "db_name": db_size_res[0] if db_size_res else "satellitum",
+                "total_pretty": db_size_res[1] if db_size_res else "0 MB",
+                "total_bytes": db_size_res[2] if db_size_res else 0,
+                "tabelas_df": df_tables,
+                "contagens": contagens
+            }
+    except Exception as e:
+        print(f"Erro ao obter estatísticas de tamanho do banco: {e}")
+        return {
+            "db_name": "satellitum",
+            "total_pretty": "Indisponível",
+            "total_bytes": 0,
+            "tabelas_df": pd.DataFrame(),
+            "contagens": {}
+        }
+
+
+def excluir_pixels_por_imagem_ids(imagem_ids: list) -> int:
+    """Exclui os registros de pixels na tabela celmm_pixels correspondentes aos IDs de metadados informados."""
+    if not imagem_ids:
+        return 0
+    db = SessionLocal()
+    try:
+        qtd = db.query(CelmmPixels).filter(CelmmPixels.metadados_imagem_id.in_(imagem_ids)).delete(synchronize_session=False)
+        db.commit()
+        return qtd
+    except Exception as e:
+        db.rollback()
+        st.error(f"Erro ao excluir pixels no banco: {e}")
+        return 0
+    finally:
+        db.close()
+
+
+def excluir_produtos_completos_por_imagem_ids(imagem_ids: list) -> tuple:
+    """Exclui tanto os registros de pixels quanto os metadados das imagens no banco de dados."""
+    if not imagem_ids:
+        return (0, 0)
+    db = SessionLocal()
+    try:
+        qtd_pixels = db.query(CelmmPixels).filter(CelmmPixels.metadados_imagem_id.in_(imagem_ids)).delete(synchronize_session=False)
+        qtd_meta = db.query(MetadadosImagens).filter(MetadadosImagens.id.in_(imagem_ids)).delete(synchronize_session=False)
+        db.commit()
+        return (qtd_pixels, qtd_meta)
+    except Exception as e:
+        db.rollback()
+        st.error(f"Erro ao excluir produtos no banco: {e}")
+        return (0, 0)
+    finally:
+        db.close()
+
+

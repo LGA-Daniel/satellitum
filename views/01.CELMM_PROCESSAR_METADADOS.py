@@ -1,1 +1,0 @@
-# Este arquivo foi migrado para uma modal em Explorar Metadados (views/02.CELMM_VISUALIZAR_METADADOS.py)

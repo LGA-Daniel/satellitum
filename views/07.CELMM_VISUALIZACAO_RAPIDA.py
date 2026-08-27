@@ -41,7 +41,7 @@ id_imagem_ativa = ids_selecionados[0]
 meta_ativo = next((m for m in metadados_filtrados if m['id'] == id_imagem_ativa), metadados_filtrados[0])
 
 # Consulta com cache no banco
-with st.spinner("Carregando coordenadas e bandas (B4, B3, B2) do PostgreSQL..."):
+with st.spinner("Carregando coordenadas e bandas (B4, B3, B2) do Banco de Dados..."):
     df_pixels = obter_df_raster_cor_verdadeira_cached(id_imagem_ativa)
 
 if df_pixels.empty:

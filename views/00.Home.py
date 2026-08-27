@@ -8,4 +8,4 @@ st.subheader("Sistema de Processamento e Armazenamento de Produtos Orbitais")
 
 st.divider()
 
-st.caption("FlowBR | PPGRHS | Centro de Tecnologia — Versão Dev.26.08.2026")
+st.caption("FlowBR | PPGRHS | Centro de Tecnologia — Versão Beta 08.2026")
