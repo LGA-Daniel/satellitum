@@ -56,13 +56,6 @@ AVAILABLE_VIEWS = [
         "category": "Visualização & Análise",
         "views": [
             {
-                "name": "CELMM - Visualizar e Exportar Dados",
-                "path": "views/05.CELMM_VISUALIZAR_DADOS.py",
-                "icon": "📊",
-                "url_path": "celmm_visualizar_dados",
-                "default": True
-            },
-            {
                 "name": "CELMM - Prévia de Dados",
                 "path": "views/06.CELMM_PREVIA_DADOS.py",
                 "icon": "👁️",

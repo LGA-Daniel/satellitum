@@ -2,7 +2,11 @@ import streamlit as st
 import pandas as pd
 import datetime
 import inspect
-from modules.db import criar_tarefa_background, obter_df_pixels_por_imagem_ids
+from modules.db import (
+    criar_tarefa_background, 
+    obter_df_pixels_por_imagem_ids,
+    obter_amostra_pixels_por_imagem_ids
+)
 from modules.data_export import preparar_arquivo_exportacao, limpar_arquivos_exportacao_disco
 
 def on_dismiss_acoes_callback():
@@ -175,16 +179,14 @@ def _acoes_produtos_dialog_impl(selected_rows, valid_drive_selected, valid_db_se
                     <p style="margin: 0; font-size: 0.85em; opacity: 0.75; line-height: 1.35;">Visualizar prévia dos dados/pixels brutos e imagens reconstituídas.</p>
                 </div>
             """, unsafe_allow_html=True)
-            pode_ver = (total_db == 1 and total_sel == 1)
+            pode_ver = total_db >= 1
             
             if pode_ver:
-                help_vis = "Abre a prévia de dados e composição RGB para o produto selecionado."
+                help_vis = f"Abre a prévia de dados e renderização de imagens para o(s) {total_db} produto(s) sincronizado(s)."
             elif total_sel == 0:
-                help_vis = "Selecione exatamente 1 produto na tabela para visualizar seus dados."
-            elif total_sel > 1:
-                help_vis = f"A visualização de dados suporta apenas 1 produto por vez. Você selecionou {total_sel} produtos."
+                help_vis = "Selecione ao menos 1 produto na tabela para visualizar seus dados."
             else:
-                help_vis = "O produto selecionado ainda não foi sincronizado com o banco de dados. Sincronize-o antes de visualizar."
+                help_vis = "Nenhum dos produtos selecionados possui dados salvos no banco. Sincronize antes de visualizar."
 
             if st.button(
                 "Abrir Visualização de Dados", 
@@ -195,11 +197,12 @@ def _acoes_produtos_dialog_impl(selected_rows, valid_drive_selected, valid_db_se
                 key="modal_btn_vis"
             ):
                 st.session_state['show_acoes_modal'] = False
-                id_img = int(valid_db_selected.iloc[0]['id'])
-                with st.spinner("Carregando amostra de dados para visualização..."):
-                    df_pixels = obter_df_pixels_por_imagem_ids([id_img], limit=500)
+                valid_db_sorted = valid_db_selected.sort_values(by='Data do Produto', ascending=True)
+                ids_imgs = [int(x) for x in valid_db_sorted['id'].tolist()]
+                with st.spinner("Carregando amostra de dados (50 primeiras linhas por produto)..."):
+                    df_pixels = obter_amostra_pixels_por_imagem_ids(ids_imgs, limit_por_imagem=50)
                     st.session_state["df_pixels_carregados"] = df_pixels
-                    st.session_state["ids_pixels_carregados"] = [id_img]
+                    st.session_state["ids_pixels_carregados"] = ids_imgs
                     st.session_state["carregado_parcial"] = True
                     st.switch_page("views/06.CELMM_PREVIA_DADOS.py")
 

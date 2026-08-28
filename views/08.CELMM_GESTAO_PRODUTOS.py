@@ -32,10 +32,14 @@ if 'show_acoes_modal' not in st.session_state:
 if 'show_download_modal' not in st.session_state:
     st.session_state['show_download_modal'] = False
 
+if 'produtos_selecionados_ids' not in st.session_state:
+    st.session_state['produtos_selecionados_ids'] = set()
+
 def limpar_filtros_callback():
     st.session_state['reset_counter'] += 1
     listar_arquivos_pasta_drive.clear()
     resetar_estado_processamento()
+    st.session_state['produtos_selecionados_ids'] = set()
 
 def resetar_estado_processamento():
     st.session_state["confirmar_sobrescrever_pixels"] = False
@@ -60,7 +64,7 @@ st.divider()
 if not init_gee():
     st.stop()
 
-with st.spinner("Carregando metadados, arquivos do Google Drive e status do banco..."):
+with st.spinner("Conectando com o Repositório e Banco de Dados..."):
     dados = obter_metadados_salvos()
     arquivos_drive = listar_arquivos_pasta_drive("CSV_Sentinel2")
     ids_com_pixels = obter_ids_imagens_com_pixels()
@@ -263,12 +267,32 @@ if df_filtrado.empty:
             st.session_state['show_buscar_modal'] = True
             st.rerun()
 else:
+    def on_toggle_todos():
+        chk = st.session_state.get(f"chk_marcar_todos_{st.session_state['reset_counter']}", False)
+        if chk:
+            st.session_state['produtos_selecionados_ids'] = set(df_filtrado['id'].tolist())
+        else:
+            st.session_state['produtos_selecionados_ids'] = set()
+        resetar_estado_processamento()
+
+    ids_atuais_filtrados = set(df_filtrado['id'].tolist())
+    todos_marcados = len(ids_atuais_filtrados) > 0 and ids_atuais_filtrados.issubset(st.session_state.get('produtos_selecionados_ids', set()))
+
     col_chk, col_sp = st.columns([3, 9])
     with col_chk:
-        selecionar_padrao = st.checkbox("Marcar todos", value=False, on_change=resetar_estado_processamento)
+        selecionar_padrao = st.checkbox(
+            "Marcar todos", 
+            value=todos_marcados, 
+            key=f"chk_marcar_todos_{st.session_state['reset_counter']}",
+            on_change=on_toggle_todos
+        )
     
     df_display = df_filtrado.copy()
-    df_display.insert(0, "Selecionar", selecionar_padrao)
+    df_display.insert(
+        0, 
+        "Selecionar", 
+        df_display['id'].apply(lambda x: x in st.session_state.get('produtos_selecionados_ids', set()))
+    )
     
     df_to_edit = df_display[[
         'Selecionar', 'id', 'data', 'satelite', 'z_grade_mgrs', 'tamanho_pixel', 'pixels_validos', 'zenital', 'Status do Processamento', 'Importado para o Banco'
@@ -292,7 +316,7 @@ else:
             "Selecionar": st.column_config.CheckboxColumn(
                 "Selecionar",
                 help="Selecione produtos para executar ações em lote",
-                default=selecionar_padrao,
+                default=False,
             ),
             "id": None,
             "zenital": None,
@@ -314,6 +338,7 @@ else:
     # 9. BARRA DE CONTROLE: BOTÃO ÚNICO DE AÇÕES
     # ==============================================================================
     selected_rows = edited_df[edited_df["Selecionar"] == True]
+    st.session_state['produtos_selecionados_ids'] = set(selected_rows['id'].tolist())
     valid_drive_selected = selected_rows[selected_rows["Status do Processamento"] == "Disponível ✅"]
     valid_db_selected = selected_rows[selected_rows["Importado para o Banco"] == "Salvo ✅"]
     

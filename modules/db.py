@@ -249,6 +249,31 @@ def obter_df_pixels_por_imagem_ids(imagem_ids: list, limit: int = None) -> pd.Da
     finally:
         db.close()
 
+def obter_amostra_pixels_por_imagem_ids(imagem_ids: list, limit_por_imagem: int = 50) -> pd.DataFrame:
+    """Busca as N primeiras linhas de amostra para cada imagem_id informado usando Window Functions."""
+    if not imagem_ids:
+        return pd.DataFrame()
+    try:
+        from sqlalchemy import text, bindparam
+        query = text("""
+            SELECT * FROM (
+                SELECT *, ROW_NUMBER() OVER (PARTITION BY metadados_imagem_id ORDER BY id ASC) as row_num
+                FROM celmm_pixels
+                WHERE metadados_imagem_id IN :ids AND system_index != 'EMPTY_0_PIXELS'
+            ) sub
+            WHERE row_num <= :limit_val
+            ORDER BY data ASC, id ASC;
+        """).bindparams(bindparam('ids', expanding=True))
+        
+        with engine.connect() as conn:
+            df = pd.read_sql(query, conn, params={"ids": list(imagem_ids), "limit_val": limit_por_imagem})
+        if 'row_num' in df.columns:
+            df = df.drop(columns=['row_num'])
+        return df
+    except Exception as e:
+        st.error(f"Erro ao buscar amostra de pixels por produto: {e}")
+        return pd.DataFrame()
+
 @st.cache_data(ttl=600)
 def obter_df_raster_cor_verdadeira_cached(metadados_imagem_id: int) -> pd.DataFrame:
     """Busca com cache do Streamlit as colunas de coordenadas e bandas B4, B3, B2 para uma imagem raster."""
@@ -266,6 +291,25 @@ def obter_df_raster_cor_verdadeira_cached(metadados_imagem_id: int) -> pd.DataFr
         return df
     except Exception as e:
         st.error(f"Erro ao buscar dados raster para a imagem ID {metadados_imagem_id}: {e}")
+        return pd.DataFrame()
+
+@st.cache_data(ttl=600)
+def obter_df_raster_multibandas_cached(metadados_imagem_id: int) -> pd.DataFrame:
+    """Busca com cache do Streamlit coordenadas e bandas espectrais para geração de raster."""
+    if not metadados_imagem_id:
+        return pd.DataFrame()
+    try:
+        from sqlalchemy import text
+        query = text("""
+            SELECT latitude, longitude, "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B9", "B11", "B12"
+            FROM celmm_pixels
+            WHERE metadados_imagem_id = :img_id AND system_index != 'EMPTY_0_PIXELS'
+        """)
+        with engine.connect() as conn:
+            df = pd.read_sql(query, conn, params={"img_id": metadados_imagem_id})
+        return df
+    except Exception as e:
+        st.error(f"Erro ao buscar dados raster multibandas para a imagem ID {metadados_imagem_id}: {e}")
         return pd.DataFrame()
 
 def obter_df_pixels_por_imagem_ids_generator(imagem_ids: list, chunksize: int = 50000):
