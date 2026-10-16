@@ -7,7 +7,7 @@ COMBINACOES_ESPECTRAIS = {
     "RGB_TRUE_COLOR": {
         "nome": "Cor Verdadeira (RGB: B4, B3, B2)",
         "bandas": ['B4', 'B3', 'B2'],
-        "descricao": "B4 (Vermelho), B3 (Verde), B2 (Azul) — Visualização em cores naturais reais",
+        "descricao": "B4 (Vermelho), B3 (Verde), B2 (Azul) — Visualização em cores reais",
         "max_val": 3000.0
     },
     "FALSE_COLOR_NIR": {

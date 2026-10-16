@@ -13,7 +13,7 @@ from modules.raster import (
     processar_matriz_combinacao
 )
 
-st.set_page_config(page_title="CELMM | Visualização em Carrossel", page_icon="🖼️", layout="wide")
+st.set_page_config(page_title="CELMM | Visualização ", page_icon="🛰️", layout="wide")
 
 # ==============================================================================
 # 1. VERIFICAÇÃO DE SESSÃO & DADOS
@@ -197,7 +197,7 @@ with col_info_carrossel:
     st.markdown(f"""
         <div style="text-align: center; background-color: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 8px; padding: 6px 12px;">
             <div style="font-size: 1.05em; font-weight: 600; color: var(--primary-color);">
-                📅 {slide_ativo['data_fmt']} &nbsp;•&nbsp; 🎨 {slide_ativo['nome']}
+                {slide_ativo['data_fmt']} &nbsp;•&nbsp; {slide_ativo['nome']}
             </div>
             <div style="font-size: 0.82em; opacity: 0.70; margin-top: 2px;">
                 Slide {idx_ativo + 1} de {total_slides} &nbsp;|&nbsp; {slide_ativo['descricao']}

@@ -355,7 +355,7 @@ else:
     col_spacer, col_btn_acoes = st.columns([8, 4])
     
     with col_btn_acoes:
-        label_btn = f"Ações - Selecionados: {total_sel}" if total_sel > 0 else " Selecione os Produtos"
+        label_btn = f"Processar Produtos"
         if st.button(
             label_btn,
             type="primary",

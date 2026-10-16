@@ -144,19 +144,19 @@ def dialog_selecionar_renderizacao_impl():
         options=opcoes_comb,
         format_func=lambda k: COMBINACOES_ESPECTRAIS[k]["nome"],
         default=["RGB_TRUE_COLOR"],
-        help="Cada produto selecionado será processado para cada combinação escolhida e disponibilizado no carrossel."
+        help="Cada produto selecionado será processado para cada combinação escolhida e disponibilizado como Imagem."
     )
     
     for k in selecionados:
         st.caption(f"🔹 **{COMBINACOES_ESPECTRAIS[k]['nome']}**: {COMBINACOES_ESPECTRAIS[k]['descricao']}")
         
     total_imagens_geradas = len(selecionados) * total_produtos_sel
-    st.info(f"📊 Total de imagens no carrossel: **{total_imagens_geradas}** ({total_produtos_sel} data(s) × {len(selecionados)} combinação(ões)).")
+    st.info(f"Total de imagens: **{total_imagens_geradas}**")
     
     st.markdown("---")
     col_dlg_btn1, col_dlg_btn2 = st.columns([6, 4])
     with col_dlg_btn2:
-        if st.button("🖼️ Processar e Visualizar", type="primary", use_container_width=True, disabled=len(selecionados) == 0):
+        if st.button("Gerar Imagens", type="primary", use_container_width=True, disabled=len(selecionados) == 0):
             st.session_state["combinacoes_renderizacao"] = selecionados
             st.session_state["show_render_modal"] = False
             st.session_state["carousel_index"] = 0
@@ -166,11 +166,11 @@ sig_dialog = inspect.signature(st.dialog)
 dialog_kwargs = {"width": "large"} if "width" in sig_dialog.parameters else {}
 
 if 'on_dismiss' in sig_dialog.parameters:
-    @st.dialog("🖼️ Configurar Visualização de Imagens", on_dismiss=lambda: st.session_state.update({'show_render_modal': False}), **dialog_kwargs)
+    @st.dialog("Processar Imagens", on_dismiss=lambda: st.session_state.update({'show_render_modal': False}), **dialog_kwargs)
     def render_config_dialog():
         dialog_selecionar_renderizacao_impl()
 else:
-    @st.dialog("🖼️ Configurar Visualização de Imagens", dismissible=True, **dialog_kwargs)
+    @st.dialog("Processar Imagens", dismissible=True, **dialog_kwargs)
     def render_config_dialog():
         dialog_selecionar_renderizacao_impl()
 
@@ -191,7 +191,7 @@ with col_act1:
                 <p style="margin: 0; font-size: 0.85em; opacity: 0.75; line-height: 1.35;">Renderizar imagens combinando bandas dos produtos.</p>
             </div>
         """, unsafe_allow_html=True)
-        if st.button("Configurar e Visualizar Imagens", type="primary", use_container_width=True, key="btn_abrir_render_modal"):
+        if st.button("Processar Imagens", type="primary", use_container_width=True, key="btn_abrir_render_modal"):
             st.session_state['show_render_modal'] = True
             st.rerun()
 
