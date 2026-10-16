@@ -20,12 +20,13 @@ st.title("Administração do Sistema")
 st.divider()
 
 # Cria as abas administrativas do sistema
-tab_auth, tab_db, tab_batch, tab_users, tab_data = st.tabs([
+tab_auth, tab_db, tab_batch, tab_users, tab_data, tab_val = st.tabs([
     "🔑 Autenticação Google (Drive & GEE)", 
     "🗄️ Métricas do Banco", 
     "⚙️ Operações em Lote",
     "👥 Gestão de Usuários",
-    "💾 Gestão de Dados"
+    "💾 Gestão de Dados",
+    "🧪 Validação"
 ])
 
 with tab_auth:
@@ -555,3 +556,51 @@ with tab_data:
             st.session_state.get("del_pixels_ids", []),
             st.session_state.get("del_pixels_datas", [])
         )
+
+with tab_val:
+    from modules.api_gee import validar_metodo_historico
+
+    st.subheader("Validação de Cronograma Orbital (Backtesting)")
+
+    dias_teste_val = st.selectbox(
+        "Janela de Validação Retrospectiva:",
+        options=[30, 60, 90],
+        index=1,
+        format_func=lambda x: f"Últimos {x} dias",
+        help="Período no qual as previsões serão comparadas com as aquisições reais."
+    )
+    btn_exec_val = st.button("🧪 Executar Teste de Validação", type="primary", use_container_width=True)
+
+    if btn_exec_val:
+        with st.spinner("Executando teste cego de backtesting com o Google Earth Engine..."):
+            try:
+                res_val = validar_metodo_historico(dias_teste=dias_teste_val)
+                st.session_state["manutencao_resultado_validacao"] = res_val
+                st.toast("Validação concluída com sucesso!", icon="✅")
+            except Exception as e:
+                st.error(f"Erro ao executar teste de validação: {e}")
+
+    if "manutencao_resultado_validacao" in st.session_state:
+        val = st.session_state["manutencao_resultado_validacao"]
+        st.markdown(f"### 📊 Resultado da Validação — Período: `{val['periodo_teste']}`")
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Taxa de Concordância", f"{val['taxa_acuracia']}%")
+        c2.metric("Total de Datas Avaliadas", val["total_eventos"])
+        c3.metric("Precisão Orbital", "Nominal (Exata)")
+
+        st.markdown("#### 📋 Confronto Detalhado: Previsão do Algoritmo vs Registro Real no GEE")
+        df_val = pd.DataFrame(val["comparativo"])
+        st.dataframe(
+            df_val,
+            use_container_width=True,
+            hide_index=True,
+            height=400,
+            column_config={
+                "Data": st.column_config.TextColumn("Data", width="small"),
+                "Previsto pelo Algoritmo": st.column_config.TextColumn("Satélite(s) Previsto(s)", width="medium"),
+                "Realmente Catalogado no GEE": st.column_config.TextColumn("Registro Real no GEE", width="medium"),
+                "Status": st.column_config.TextColumn("Status de Validação", width="medium"),
+            }
+        )
+

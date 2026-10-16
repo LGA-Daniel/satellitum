@@ -37,19 +37,26 @@ AVAILABLE_VIEWS = [
                 "icon": "🛰️",
                 "url_path": None,
                 "default": True
-            }
+            },
         ]
     },
     {
         "category": "Processamento & Metadados",
         "views": [
             {
+                "name": "CELMM | Cronograma de Órbitas",
+                "path": "views/01.Schedule_Satelites.py",
+                "icon": "🛰️",
+                "url_path": "cronograma_passagens",
+                "default": True
+            },             
+            {
                 "name": "CELMM | Gerenciamento de Produtos Orbitais",
                 "path": "views/08.CELMM_GESTAO_PRODUTOS.py",
                 "icon": "🛰️",
                 "url_path": None,
                 "default": True
-            }
+            }            
         ]
     },
     {
