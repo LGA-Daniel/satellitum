@@ -71,33 +71,6 @@ setup_database()
 cookie_manager = stx.CookieManager(key="satellitum_auth_cookie_manager")
 
 # ==============================================================================
-# 0. CAPTURA E PROCESSAMENTO AUTOMÁTICO DO RETORNO GOOGLE OAUTH
-# ==============================================================================
-if "code" in st.query_params:
-    raw_code = st.query_params["code"]
-    if isinstance(raw_code, list):
-        raw_code = raw_code[0]
-        
-    last_processed = st.session_state.get("_last_processed_oauth_code")
-    if raw_code and raw_code != last_processed:
-        st.session_state["_last_processed_oauth_code"] = raw_code
-        try:
-            from modules.google_auth import get_tokens, processar_e_salvar_tokens
-            tokens = get_tokens(raw_code)
-            if "access_token" in tokens:
-                processar_e_salvar_tokens(tokens)
-                st.toast("🎉 Conta Google autenticada e credenciais salvas com sucesso!", icon="✅")
-                st.query_params.clear()
-                st.rerun()
-            else:
-                err_msg = tokens.get("error_description") or tokens.get("error") or "Falha ao obter tokens."
-                st.toast(f"⚠️ Erro no Google OAuth: {err_msg}", icon="❌")
-                st.query_params.clear()
-        except Exception as e:
-            st.toast(f"⚠️ Erro ao processar tokens: {e}", icon="❌")
-            st.query_params.clear()
-
-# ==============================================================================
 # 1. VERIFICAÇÃO AUTOMÁTICA DE SESSÃO & COOKIE JWT
 # ==============================================================================
 if ("user" not in st.session_state or st.session_state.user is None) and not st.session_state.get("logged_out"):
@@ -112,6 +85,9 @@ if ("user" not in st.session_state or st.session_state.user is None) and not st.
 # 2. RENDERIZAÇÃO DA TELA DE LOGIN (SEM BARRA LATERAL)
 # ==============================================================================
 if "user" not in st.session_state or st.session_state.user is None:
+    # Se houver tentativa de injetar código OAuth sem autenticação, limpa o parâmetro
+    if "code" in st.query_params:
+        st.query_params.clear()
     # Renderiza apenas a tela de login com a barra lateral totalmente oculta
     pg_login = st.navigation([st.Page(lambda: render_login_view(cookie_manager), title="Login", icon="🔒")], position="hidden")
     pg_login.run()
@@ -121,6 +97,35 @@ if "user" not in st.session_state or st.session_state.user is None:
 # 3. FLUXO: USUÁRIO AUTENTICADO (NAVEGAÇÃO DINÂMICA RBAC)
 # ==============================================================================
 logged_user = st.session_state.user
+
+# Processamento de retorno Google OAuth restrito exclusivamente a administradores
+if "code" in st.query_params:
+    raw_code = st.query_params["code"]
+    if isinstance(raw_code, list):
+        raw_code = raw_code[0]
+        
+    is_admin = (logged_user.get("role") == "admin") or (logged_user.get("username") == "admin")
+    if is_admin:
+        last_processed = st.session_state.get("_last_processed_oauth_code")
+        if raw_code and raw_code != last_processed:
+            st.session_state["_last_processed_oauth_code"] = raw_code
+            try:
+                from modules.google_auth import get_tokens, processar_e_salvar_tokens
+                tokens = get_tokens(raw_code)
+                if "access_token" in tokens:
+                    processar_e_salvar_tokens(tokens)
+                    st.toast("🎉 Conta Google autenticada e credenciais salvas com sucesso!", icon="✅")
+                else:
+                    err_msg = tokens.get("error_description") or tokens.get("error") or "Falha ao obter tokens."
+                    st.toast(f"⚠️ Erro no Google OAuth: {err_msg}", icon="❌")
+            except Exception as e:
+                st.toast(f"⚠️ Erro ao processar tokens: {e}", icon="❌")
+    else:
+        st.toast("⚠️ Apenas administradores do sistema podem vincular credenciais Google.", icon="🔒")
+        
+    st.query_params.clear()
+    st.rerun()
+
 user_views = logged_user.get("views", [])
 
 # Sidebar: Informações do Usuário e Botão de Logout

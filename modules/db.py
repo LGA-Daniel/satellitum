@@ -1,5 +1,6 @@
 import os
 import datetime
+import logging
 from typing import Optional
 import streamlit as st
 import pandas as pd
@@ -8,6 +9,16 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.dialects.postgresql import insert
 from modules.models import HistoricoExecucao, MetadadosImagens, CelmmPixels, BackgroundTask, User
 
+logger = logging.getLogger(__name__)
+
+def _notificar_erro(msg: str, exc: Exception):
+    """Envia o traceback completo ao stdout do Docker e exibe mensagem amigável no Streamlit."""
+    logger.error(f"{msg}: {exc}", exc_info=True)
+    try:
+        st.error(f"{msg}. Consulte os logs do contêiner para detalhes técnicos.")
+    except Exception:
+        pass
+
 # Configurações do Banco de Dados a partir do ambiente (.env)
 DB_HOST = os.getenv("DB_HOST", "satellitum_db")
 DB_PORT = os.getenv("DB_PORT", "5432")
@@ -15,7 +26,7 @@ DB_NAME = os.getenv("DB_NAME") or os.getenv("POSTGRES_DB", "satellitum")
 DB_USER = os.getenv("DB_USER") or os.getenv("POSTGRES_USER", "postgres")
 DB_PASS = os.getenv("DB_PASS") or os.getenv("POSTGRES_PASSWORD", "")
 
-DATABASE_URL = f"postgresql://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
+DATABASE_URL = f"postgresql+psycopg2://{DB_USER}:{DB_PASS}@{DB_HOST}:{DB_PORT}/{DB_NAME}"
 
 # Criação do Engine do SQLAlchemy com gerenciamento robusto do pool de conexões
 engine = create_engine(
@@ -48,7 +59,7 @@ def registrar_historico(nome_arquivo: str, script: str, status_execucao: str):
         db.commit()
     except Exception as e:
         db.rollback()
-        st.error(f"Erro ao salvar histórico de execução: {e}")
+        _notificar_erro("Erro ao salvar histórico de execução", e)
     finally:
         db.close()
 
@@ -78,7 +89,7 @@ def salvar_metadados(lista_dados: list, tamanho_pixel: int) -> bool:
         return True
     except Exception as e:
         db.rollback()
-        st.error(f"Erro ao salvar metadados no banco: {e}")
+        _notificar_erro("Erro ao salvar metadados no banco", e)
         return False
     finally:
         db.close()
@@ -107,7 +118,7 @@ def verificar_metadados_existentes(lista_dados: list, tamanho_pixel: int) -> lis
                 datas_conflito.append(data_val)
         return sorted(list(set(datas_conflito)))
     except Exception as e:
-        st.error(f"Erro ao verificar metadados no banco: {e}")
+        _notificar_erro("Erro ao verificar metadados no banco", e)
         return []
     finally:
         db.close()
@@ -119,7 +130,7 @@ def obter_metadados_salvos() -> list:
         registros = db.query(MetadadosImagens).order_by(MetadadosImagens.data.desc()).all()
         return [r.to_dict() for r in registros]
     except Exception as e:
-        st.error(f"Erro ao buscar metadados do banco: {e}")
+        _notificar_erro("Erro ao buscar metadados do banco", e)
         return []
     finally:
         db.close()
@@ -222,7 +233,7 @@ def obter_ids_imagens_com_pixels() -> set:
         resultado = db.query(CelmmPixels.metadados_imagem_id).distinct().all()
         return {r[0] for r in resultado}
     except Exception as e:
-        st.error(f"Erro ao buscar IDs de imagens com pixels no banco: {e}")
+        _notificar_erro("Erro ao buscar IDs de imagens com pixels no banco", e)
         return set()
     finally:
         db.close()
@@ -244,7 +255,7 @@ def obter_df_pixels_por_imagem_ids(imagem_ids: list, limit: int = None) -> pd.Da
         df = pd.read_sql(query.statement, db.bind)
         return df
     except Exception as e:
-        st.error(f"Erro ao buscar pixels do banco de dados: {e}")
+        _notificar_erro("Erro ao buscar pixels do banco de dados", e)
         return pd.DataFrame()
     finally:
         db.close()
@@ -271,7 +282,7 @@ def obter_amostra_pixels_por_imagem_ids(imagem_ids: list, limit_por_imagem: int 
             df = df.drop(columns=['row_num'])
         return df
     except Exception as e:
-        st.error(f"Erro ao buscar amostra de pixels por produto: {e}")
+        _notificar_erro("Erro ao buscar amostra de pixels por produto", e)
         return pd.DataFrame()
 
 @st.cache_data(ttl=600)
@@ -290,7 +301,7 @@ def obter_df_raster_cor_verdadeira_cached(metadados_imagem_id: int) -> pd.DataFr
             df = pd.read_sql(query, conn, params={"img_id": metadados_imagem_id})
         return df
     except Exception as e:
-        st.error(f"Erro ao buscar dados raster para a imagem ID {metadados_imagem_id}: {e}")
+        _notificar_erro(f"Erro ao buscar dados raster para a imagem ID {metadados_imagem_id}", e)
         return pd.DataFrame()
 
 @st.cache_data(ttl=600)
@@ -309,7 +320,7 @@ def obter_df_raster_multibandas_cached(metadados_imagem_id: int) -> pd.DataFrame
             df = pd.read_sql(query, conn, params={"img_id": metadados_imagem_id})
         return df
     except Exception as e:
-        st.error(f"Erro ao buscar dados raster multibandas para a imagem ID {metadados_imagem_id}: {e}")
+        _notificar_erro(f"Erro ao buscar dados raster multibandas para a imagem ID {metadados_imagem_id}", e)
         return pd.DataFrame()
 
 def obter_df_pixels_por_imagem_ids_generator(imagem_ids: list, chunksize: int = 50000):
@@ -327,7 +338,7 @@ def obter_df_pixels_por_imagem_ids_generator(imagem_ids: list, chunksize: int = 
         for chunk in pd.read_sql(query.statement, db.bind, chunksize=chunksize):
             yield chunk
     except Exception as e:
-        st.error(f"Erro ao buscar pixels do banco de dados em lotes: {e}")
+        _notificar_erro("Erro ao buscar pixels do banco de dados em lotes", e)
     finally:
         db.close()
 
@@ -357,7 +368,7 @@ def criar_tarefa_background(tipo_tarefa: str, payload_dict: dict, total_itens: i
         return tarefa.id
     except Exception as e:
         db.rollback()
-        st.error(f"Erro ao criar tarefa de background: {e}")
+        _notificar_erro("Erro ao criar tarefa de background", e)
         return None
     finally:
         db.close()
@@ -372,7 +383,7 @@ def obter_tarefa_ativa() -> Optional[dict]:
         
         return tarefa.to_dict() if tarefa else None
     except Exception as e:
-        st.error(f"Erro ao buscar tarefa ativa: {e}")
+        _notificar_erro("Erro ao buscar tarefa ativa", e)
         return None
     finally:
         db.close()
@@ -389,7 +400,7 @@ def cancelar_tarefa(tarefa_id: int):
             db.commit()
     except Exception as e:
         db.rollback()
-        st.error(f"Erro ao cancelar tarefa: {e}")
+        _notificar_erro("Erro ao cancelar tarefa", e)
     finally:
         db.close()
 
@@ -400,7 +411,7 @@ def obter_status_tarefa(tarefa_id: int) -> Optional[dict]:
         tarefa = db.query(BackgroundTask).filter(BackgroundTask.id == tarefa_id).first()
         return tarefa.to_dict() if tarefa else None
     except Exception as e:
-        st.error(f"Erro ao obter status da tarefa: {e}")
+        _notificar_erro("Erro ao obter status da tarefa", e)
         return None
     finally:
         db.close()
@@ -412,7 +423,7 @@ def obter_historico_tarefas(limit: int = 10) -> list:
         tarefas = db.query(BackgroundTask).order_by(BackgroundTask.id.desc()).limit(limit).all()
         return [t.to_dict() for t in tarefas]
     except Exception as e:
-        st.error(f"Erro ao buscar histórico de tarefas: {e}")
+        _notificar_erro("Erro ao buscar histórico de tarefas", e)
         return []
     finally:
         db.close()
@@ -423,7 +434,7 @@ def obter_total_pixels() -> int:
     try:
         return db.query(func.count(CelmmPixels.id)).scalar() or 0
     except Exception as e:
-        st.error(f"Erro ao contar pixels no banco: {e}")
+        _notificar_erro("Erro ao contar pixels no banco", e)
         return 0
     finally:
         db.close()
@@ -497,7 +508,7 @@ def excluir_pixels_por_imagem_ids(imagem_ids: list) -> int:
         return qtd
     except Exception as e:
         db.rollback()
-        st.error(f"Erro ao excluir pixels no banco: {e}")
+        _notificar_erro("Erro ao excluir pixels no banco", e)
         return 0
     finally:
         db.close()
@@ -515,7 +526,7 @@ def excluir_produtos_completos_por_imagem_ids(imagem_ids: list) -> tuple:
         return (qtd_pixels, qtd_meta)
     except Exception as e:
         db.rollback()
-        st.error(f"Erro ao excluir produtos no banco: {e}")
+        _notificar_erro("Erro ao excluir produtos no banco", e)
         return (0, 0)
     finally:
         db.close()

@@ -170,6 +170,7 @@ class User(Base):
             "id": self.id,
             "username": self.username,
             "name": self.name or "",
+            "role": self.role or "user",
             "views": self.views if self.views is not None else [],
             "created_at": self.created_at.strftime("%d/%m/%Y %H:%M:%S") if self.created_at else None
         }

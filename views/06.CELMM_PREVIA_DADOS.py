@@ -1,7 +1,11 @@
 import datetime
 import streamlit as st
 import pandas as pd
+import html
 import inspect
+import logging
+
+logger = logging.getLogger(__name__)
 from modules.db import (
     obter_metadados_salvos,
     obter_amostra_pixels_por_imagem_ids
@@ -11,9 +15,16 @@ from modules.raster import COMBINACOES_ESPECTRAIS
 
 st.set_page_config(page_title="CELMM | Prévia de Dados", page_icon="🛰️", layout="wide")
 
+current_user = st.session_state.get("user")
+if not current_user:
+    st.error("⛔ Acesso não autorizado. Faça login para acessar esta página.")
+    st.stop()
+
 # Função auxiliar para cards de métricas no padrão visual do sistema
 def card_destacado(label, value, title_tooltip=None):
-    tooltip_attr = f'title="{title_tooltip}"' if title_tooltip else ""
+    s_label = html.escape(str(label))
+    s_value = html.escape(str(value))
+    tooltip_attr = f'title="{html.escape(str(title_tooltip))}"' if title_tooltip else ""
     return f"""
         <div style="
             background-color: rgba(2, 132, 199, 0.08); 
@@ -29,8 +40,8 @@ def card_destacado(label, value, title_tooltip=None):
             margin-bottom: 15px;
             width: 100%;
         " {tooltip_attr}>
-            <p style="margin: 0; font-size: 0.85em; font-weight: 500; color: var(--text-color); opacity: 0.8; text-align: center; width: 100%;">{label}</p>
-            <div style="margin: 4px 0 0 0; font-size: 1.5em; color: var(--primary-color); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; width: 100%;">{value}</div>
+            <p style="margin: 0; font-size: 0.85em; font-weight: 500; color: var(--text-color); opacity: 0.8; text-align: center; width: 100%;">{s_label}</p>
+            <div style="margin: 4px 0 0 0; font-size: 1.5em; color: var(--primary-color); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; width: 100%;">{s_value}</div>
         </div>
     """
 
@@ -228,7 +239,8 @@ with col_act2:
                             limpar_arquivos_exportacao_disco()
                             st.rerun()
                 except Exception as e:
-                    st.error(f"Erro na exportação: {e}")
+                    logger.error(f"Erro na exportação de dados: {e}", exc_info=True)
+                    st.error("Não foi possível gerar o arquivo de exportação. Tente novamente ou use o formato CSV.")
         else:
             col_btn_csv, col_btn_xlsx = st.columns(2)
             with col_btn_csv:

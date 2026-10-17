@@ -1,7 +1,10 @@
 import os
 import time
 import io
+import logging
 import streamlit as st
+
+logger = logging.getLogger(__name__)
 
 def obter_caminho_token() -> str:
     """Retorna o caminho do arquivo JSON de credenciais da Service Account para o Google Drive."""
@@ -47,7 +50,8 @@ def obter_servico_gdrive():
         service = build('drive', 'v3', credentials=credentials)
         return service
     except Exception as e:
-        st.error(f"Erro ao inicializar o cliente do Google Drive: {e}")
+        logger.error(f"Erro ao inicializar o cliente do Google Drive: {e}", exc_info=True)
+        st.error("Falha ao inicializar o serviço do Google Drive. Verifique a autenticação ou os logs.")
         return None
 
 @st.cache_data(ttl=10)
@@ -122,7 +126,8 @@ def listar_arquivos_pasta_drive(folder_name: str = 'CSV_Sentinel2') -> list:
             return all_files
         except Exception as e:
             if attempt == retries - 1:
-                st.error(f"Erro ao listar arquivos do Google Drive após {retries} tentativas: {e}")
+                logger.error(f"Erro ao listar arquivos do Google Drive após {retries} tentativas: {e}", exc_info=True)
+                st.error("Não foi possível listar os arquivos do Google Drive no momento. Tente novamente.")
                 return []
             else:
                 time.sleep(delay)

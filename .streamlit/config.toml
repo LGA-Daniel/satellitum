@@ -1,5 +1,18 @@
 [theme]
 primaryColor = "#0284c7"
 
+[server]
+port = 8501
+address = "0.0.0.0"
+headless = true
+enableCORS = false
+enableXsrfProtection = true
+maxUploadSize = 50
+maxMessageSize = 50
+
+[browser]
+gatherUsageStats = false
+
 [client]
-toolbarMode = "developer"
+toolbarMode = "minimal"
+showErrorDetails = false

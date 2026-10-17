@@ -1,6 +1,10 @@
 import streamlit as st
 import datetime as dt
 import pandas as pd
+import html
+import logging
+
+logger = logging.getLogger(__name__)
 
 from modules.api_gee import (
     init_gee,
@@ -15,6 +19,11 @@ st.set_page_config(
     page_icon="🛰️",
     layout="wide"
 )
+
+current_user = st.session_state.get("user")
+if not current_user:
+    st.error("⛔ Acesso não autorizado. Faça login para acessar esta página.")
+    st.stop()
 
 # Estilização complementar
 st.markdown("""
@@ -51,7 +60,8 @@ if carregar_dados:
             if btn_atualizar:
                 st.toast("Cronograma orbital atualizado com sucesso!", icon="✅")
         except Exception as e:
-            st.error(f"Erro ao calcular cronograma orbital: {e}")
+            logger.error(f"Erro ao calcular cronograma orbital: {e}", exc_info=True)
+            st.error("Não foi possível calcular o cronograma orbital no momento.")
             st.info("💡 Verifique se as credenciais do Google Earth Engine estão ativas na aba **Administração do Sistema > Autenticação Google**.")
 
 dados = st.session_state.get("cronograma_celmm_data")
@@ -78,15 +88,16 @@ if dados and dados.get("cronograma"):
         3: 'Quinta-feira', 4: 'Sexta-feira', 5: 'Sábado', 6: 'Domingo'
     }
     dia_sem_prox = dias_semana_nomes.get(proxima["data"].weekday(), "")
-    dupla_badge = " — ⭐ **S2 + Landsat no mesmo dia**" if proxima.get("dupla_passagem") else ""
+    dupla_badge = " — ⭐ <b>S2 + Landsat no mesmo dia</b>" if proxima.get("dupla_passagem") else ""
     sat_nomes_prox = [x.get("satelite") or x.get("label", "").split(" (")[0] for x in proxima.get("satelites", [])]
     sat_nomes_prox = list(dict.fromkeys(sat_nomes_prox))
     sat_str_prox = ", ".join(sat_nomes_prox) if sat_nomes_prox else proxima.get("satelites_str", "")
+    safe_sat_str_prox = html.escape(str(sat_str_prox))
 
     st.markdown(f"""
     <div class="proxima-passagem-banner">
         <strong>Próxima Passagem:</strong> {proxima['data'].strftime('%d/%m/%Y')} ({dia_sem_prox}) — <em>{txt_tempo}</em>
-        <br><strong> Satélites:</strong> {sat_str_prox}{dupla_badge}
+        <br><strong> Satélites:</strong> {safe_sat_str_prox}{dupla_badge}
     </div>
     """, unsafe_allow_html=True)
 

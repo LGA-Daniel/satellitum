@@ -18,7 +18,7 @@ services:
     container_name: satellitum_core
     restart: always
     ports:
-      - "${APP_PORT:-8502}:8501"
+      - "127.0.0.1:${APP_PORT:-8502}:8501"
     volumes:
       - .:/app
       - ./.streamlit/credentials:/root/.config/earthengine/credentials
@@ -28,6 +28,7 @@ services:
       - DB_NAME=${POSTGRES_DB:-satellitum}
       - DB_USER=${POSTGRES_USER:-administrador}
       - DB_PASS=${POSTGRES_PASSWORD}
+      - SECRET_KEY=${SECRET_KEY:?Defina SECRET_KEY no .env}
       - GOOGLE_PROJECT_ID=${GOOGLE_PROJECT_ID:-ppgrhs-satellitum}
       - EARTHENGINE_PROJECT=${EARTHENGINE_PROJECT:-ppgrhs-satellitum}
       - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}

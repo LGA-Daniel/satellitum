@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 from PIL import Image
 import io
+import html
 
 from modules.db import (
     obter_metadados_salvos,
@@ -14,6 +15,11 @@ from modules.raster import (
 )
 
 st.set_page_config(page_title="CELMM | Visualização ", page_icon="🛰️", layout="wide")
+
+current_user = st.session_state.get("user")
+if not current_user:
+    st.error("⛔ Acesso não autorizado. Faça login para acessar esta página.")
+    st.stop()
 
 # ==============================================================================
 # 1. VERIFICAÇÃO DE SESSÃO & DADOS
@@ -154,7 +160,9 @@ with col_btn_top:
 st.divider()
 
 def card_destacado(label, value, title_tooltip=None):
-    tooltip_attr = f'title="{title_tooltip}"' if title_tooltip else ""
+    s_label = html.escape(str(label))
+    s_value = html.escape(str(value))
+    tooltip_attr = f'title="{html.escape(str(title_tooltip))}"' if title_tooltip else ""
     return f"""
         <div style="
             background-color: rgba(2, 132, 199, 0.08); 
@@ -170,8 +178,8 @@ def card_destacado(label, value, title_tooltip=None):
             margin-bottom: 12px;
             width: 100%;
         " {tooltip_attr}>
-            <p style="margin: 0; font-size: 0.82em; font-weight: 500; color: var(--text-color); opacity: 0.8; text-align: center; width: 100%;">{label}</p>
-            <div style="margin: 3px 0 0 0; font-size: 1.4em; color: var(--primary-color); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; width: 100%;">{value}</div>
+            <p style="margin: 0; font-size: 0.82em; font-weight: 500; color: var(--text-color); opacity: 0.8; text-align: center; width: 100%;">{s_label}</p>
+            <div style="margin: 3px 0 0 0; font-size: 1.4em; color: var(--primary-color); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; width: 100%;">{s_value}</div>
         </div>
     """
 

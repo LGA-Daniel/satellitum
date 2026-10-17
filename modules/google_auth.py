@@ -26,33 +26,10 @@ def obter_diretorios_credenciais() -> Tuple[str, str, str]:
     return streamlit_dir, token_path, gee_cred_path
 
 def _obter_var_ambiente(nome: str, default: str = None) -> Optional[str]:
-    """Obtém variável lendo primeiramente do arquivo .env em disco ou de os.getenv."""
-    module_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(module_dir)
-    candidatos_env = [
-        os.path.join(project_root, ".env"),
-        os.path.join(project_root, ".streamlit", ".env"),
-        ".env",
-        os.path.join(".streamlit", ".env")
-    ]
-    for caminho in candidatos_env:
-        if os.path.exists(caminho):
-            try:
-                with open(caminho, "r", encoding="utf-8") as f:
-                    for line in f:
-                        line = line.strip()
-                        if line and not line.startswith("#") and "=" in line:
-                            k, v = line.split("=", 1)
-                            if k.strip() == nome:
-                                val = v.strip().strip("'\"")
-                                if val:
-                                    return val
-            except Exception:
-                pass
-                
+    """Obtém variável de ambiente injetada no contêiner pelo Docker/SO."""
     valor = os.getenv(nome)
     if valor:
-        return valor
+        return valor.strip().strip("'\"")
     return default
 
 def obter_client_config() -> Optional[Dict[str, Any]]:

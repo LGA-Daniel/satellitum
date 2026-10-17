@@ -9,17 +9,31 @@ import streamlit as st
 from modules.models import Base, User
 from modules.db import engine, SessionLocal
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 # ==============================================================================
 # CONFIGURAÇÃO DE SEGURANÇA E JWT
 # ==============================================================================
 def get_secret_key() -> str:
-    """Obtém a chave secreta a partir do st.secrets ou variável de ambiente."""
+    """Obtém a chave secreta a partir do st.secrets ou variável de ambiente injetada no contêiner."""
     try:
         if hasattr(st, "secrets") and "SECRET_KEY" in st.secrets:
-            return str(st.secrets["SECRET_KEY"])
+            key = str(st.secrets["SECRET_KEY"])
+            if key and len(key) >= 32 and key != "satellitum-secure-jwt-token-key-2026-production":
+                return key
     except Exception:
         pass
-    return os.getenv("SECRET_KEY", "satellitum-secure-jwt-token-key-2026-production")
+    key = os.getenv("SECRET_KEY")
+    if not key or key == "satellitum-secure-jwt-token-key-2026-production" or len(key) < 32:
+        raise RuntimeError(
+            "CRITICAL SECURITY ERROR: A variável de ambiente SECRET_KEY é obrigatória, "
+            "deve ter no mínimo 32 caracteres e não pode utilizar o valor padrão. "
+            "Gere uma chave segura via 'python3 -c \"import secrets; print(secrets.token_hex(32))\"' "
+            "e configure a variável SECRET_KEY no arquivo .env."
+        )
+    return key
 
 SECRET_KEY = get_secret_key()
 JWT_ALGORITHM = "HS256"
@@ -86,7 +100,7 @@ AVAILABLE_VIEWS = [
                 "path": "views/99.Manutencao.py",
                 "icon": "⚙️",
                 "url_path": "administracao",
-                "default": True
+                "default": False
             }
         ]
     }
@@ -98,6 +112,15 @@ def get_all_view_paths() -> List[str]:
     for cat in AVAILABLE_VIEWS:
         for v in cat["views"]:
             paths.append(v["path"])
+    return paths
+
+def get_operational_view_paths() -> List[str]:
+    """Retorna os caminhos de views operacionais padrão (exclui administração do sistema)."""
+    paths = []
+    for cat in AVAILABLE_VIEWS:
+        if cat["category"] != "Administração do Sistema":
+            for v in cat["views"]:
+                paths.append(v["path"])
     return paths
 
 def get_view_metadata(path: str) -> Optional[Dict[str, Any]]:
@@ -169,7 +192,8 @@ def get_user_by_username(username: str) -> Optional[User]:
     try:
         return db.query(User).filter(User.username == username.strip().lower()).first()
     except Exception as e:
-        st.error(f"Erro ao buscar usuário: {e}")
+        logger.error(f"Erro ao buscar usuário no banco: {e}", exc_info=True)
+        st.error("Falha na comunicação com o banco de dados. Consulte os logs técnicos do sistema.")
         return None
     finally:
         db.close()
@@ -180,7 +204,8 @@ def get_all_users() -> List[User]:
     try:
         return db.query(User).order_by(User.id.asc()).all()
     except Exception as e:
-        st.error(f"Erro ao listar usuários: {e}")
+        logger.error(f"Erro ao listar usuários no banco: {e}", exc_info=True)
+        st.error("Falha ao carregar lista de usuários. Consulte os logs técnicos do sistema.")
         return []
     finally:
         db.close()
@@ -196,11 +221,11 @@ def create_user(
     if not username_clean:
         return False, "O nome de usuário (username) é obrigatório."
     
-    if not password or len(password) < 4:
-        return False, "A senha deve ter no mínimo 4 caracteres."
+    if not password or len(password) < 8:
+        return False, "A senha deve ter no mínimo 8 caracteres."
         
     if views is None:
-        views = get_all_view_paths()
+        views = get_operational_view_paths()
         
     db = SessionLocal()
     try:
@@ -216,6 +241,7 @@ def create_user(
             name=name.strip() if name else None,
             data_hash=data_hash,
             salt=salt,
+            role="user",
             views=views
         )
         db.add(new_user)
@@ -223,7 +249,8 @@ def create_user(
         return True, f"Usuário '{username_clean}' criado com sucesso!"
     except Exception as e:
         db.rollback()
-        return False, f"Erro ao criar usuário no banco de dados: {e}"
+        logger.error(f"Erro ao criar usuário no banco: {e}", exc_info=True)
+        return False, "Não foi possível cadastrar o usuário. Verifique os dados ou contate o administrador."
     finally:
         db.close()
 
@@ -243,7 +270,8 @@ def login_user(username: str, password: str) -> Optional[User]:
             return user
         return None
     except Exception as e:
-        st.error(f"Erro ao processar login: {e}")
+        logger.error(f"Erro ao processar login no banco: {e}", exc_info=True)
+        st.error("Erro interno ao autenticar usuário. Tente novamente mais tarde.")
         return None
     finally:
         db.close()
@@ -270,15 +298,16 @@ def update_user(
         return True, "Usuário atualizado com sucesso!"
     except Exception as e:
         db.rollback()
-        return False, f"Erro ao atualizar usuário: {e}"
+        logger.error(f"Erro ao atualizar usuário no banco: {e}", exc_info=True)
+        return False, "Erro ao atualizar dados do usuário no banco de dados."
     finally:
         db.close()
 
 def reset_password(username: str, new_password: str) -> Tuple[bool, str]:
     """Gera novo salt e hash para redefinir a senha do usuário."""
     username_clean = username.strip().lower() if username else ""
-    if not new_password or len(new_password) < 4:
-        return False, "A nova senha deve ter no mínimo 4 caracteres."
+    if not new_password or len(new_password) < 8:
+        return False, "A nova senha deve ter no mínimo 8 caracteres."
         
     db = SessionLocal()
     try:
@@ -296,7 +325,8 @@ def reset_password(username: str, new_password: str) -> Tuple[bool, str]:
         return True, f"Senha do usuário '{username_clean}' redefinida com sucesso!"
     except Exception as e:
         db.rollback()
-        return False, f"Erro ao redefinir senha: {e}"
+        logger.error(f"Erro ao redefinir senha no banco: {e}", exc_info=True)
+        return False, "Não foi possível redefinir a senha no momento."
     finally:
         db.close()
 
@@ -317,7 +347,8 @@ def delete_user(username: str) -> Tuple[bool, str]:
         return True, f"Usuário '{username_clean}' removido com sucesso!"
     except Exception as e:
         db.rollback()
-        return False, f"Erro ao excluir usuário: {e}"
+        logger.error(f"Erro ao excluir usuário no banco: {e}", exc_info=True)
+        return False, "Não foi possível remover o usuário."
     finally:
         db.close()
 
@@ -327,7 +358,7 @@ def init_db_and_admin_if_needed():
         # Garante a criação de todas as tabelas mapeadas no SQLAlchemy
         Base.metadata.create_all(bind=engine)
     except Exception as e:
-        st.error(f"Erro ao inicializar tabelas do banco de dados: {e}")
+        logger.error(f"Erro ao inicializar tabelas do banco de dados: {e}", exc_info=True)
         return
 
     db = SessionLocal()
@@ -342,12 +373,17 @@ def init_db_and_admin_if_needed():
                 name="Administrador do Sistema",
                 data_hash=data_hash,
                 salt=salt,
+                role="admin",
                 views=get_all_view_paths()
             )
             db.add(admin_user)
             db.commit()
+        else:
+            if getattr(admin_exists, "role", None) != "admin":
+                admin_exists.role = "admin"
+                db.commit()
     except Exception as e:
         db.rollback()
-        st.error(f"Erro ao inicializar usuário admin: {e}")
+        logger.error(f"Erro ao inicializar usuário admin: {e}", exc_info=True)
     finally:
         db.close()

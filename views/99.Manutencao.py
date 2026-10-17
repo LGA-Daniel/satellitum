@@ -3,7 +3,10 @@ import io
 import html
 import pandas as pd
 import datetime
+import logging
 from contextlib import redirect_stdout
+
+logger = logging.getLogger(__name__)
 from modules.db import (
     obter_historico_tarefas, 
     obter_status_tarefa, 
@@ -18,6 +21,12 @@ from modules.api_gdrive import listar_arquivos_pasta_drive
 
 st.title("Administração do Sistema")
 st.divider()
+
+# Validação estrita de perfil: somente administradores podem acessar esta view
+current_user = st.session_state.get("user")
+if not current_user or (current_user.get("role") != "admin" and current_user.get("username") != "admin"):
+    st.error("⛔ Acesso Negado: Esta área é restrita a administradores do sistema.")
+    st.stop()
 
 # Cria as abas administrativas do sistema
 tab_auth, tab_db, tab_batch, tab_users, tab_data, tab_val = st.tabs([
@@ -105,7 +114,8 @@ with tab_auth:
                     st.toast("Credenciais removidas com sucesso!", icon="🗑️")
                     st.rerun()
     except Exception as e:
-        st.error(f"Erro ao gerar link de login: {e}")
+        logger.error(f"Erro ao gerar link de login Google OAuth: {e}", exc_info=True)
+        st.error("Não foi possível gerar a URL de autenticação Google. Verifique o GOOGLE_CLIENT_ID e logs.")
 
     st.divider()
 
@@ -159,24 +169,27 @@ with tab_db:
 
     # Função para renderizar cards padronizados
     def card_db(label, value, subtext=""):
+        s_label = html.escape(str(label))
+        s_value = html.escape(str(value))
+        s_subtext = html.escape(str(subtext)) if subtext else ""
         return f"""
             <div style="
                 background-color: rgba(2, 132, 199, 0.08); 
                 border: 1px solid rgba(2, 132, 199, 0.25); 
                 border-radius: 8px; 
                 padding: 14px 16px; 
-                display: flex;
-                flex-direction: column;
-                align-items: center;
-                justify-content: center;
-                text-align: center;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-                margin-bottom: 15px;
+                display: flex; 
+                flex-direction: column; 
+                align-items: center; 
+                justify-content: center; 
+                text-align: center; 
+                box-shadow: 0 2px 4px rgba(0,0,0,0.05); 
+                margin-bottom: 15px; 
                 width: 100%;
             ">
-                <p style="margin: 0; font-size: 0.85em; font-weight: 500; color: var(--text-color); opacity: 0.8; text-align: center; width: 100%;">{label}</p>
-                <div style="margin: 4px 0 2px 0; font-size: 1.7em; color: var(--primary-color); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; width: 100%;">{value}</div>
-                <small style="color: var(--text-color); opacity: 0.65; font-size: 0.78em;">{subtext}</small>
+                <p style="margin: 0; font-size: 0.85em; font-weight: 500; color: var(--text-color); opacity: 0.8; text-align: center; width: 100%;">{s_label}</p>
+                <div style="margin: 4px 0 2px 0; font-size: 1.7em; color: var(--primary-color); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; width: 100%;">{s_value}</div>
+                <small style="color: var(--text-color); opacity: 0.65; font-size: 0.78em;">{s_subtext}</small>
             </div>
         """
 
@@ -228,7 +241,8 @@ with tab_db:
                 st.rerun()
                 
             except Exception as e:
-                st.error(f"Erro ao executar o script de verificação: {e}")
+                logger.error(f"Erro ao executar o script de verificação de tabelas: {e}", exc_info=True)
+                st.error("Falha ao executar a verificação do banco de dados. Consulte os logs técnicos.")
 
     # Exibe o log se houver conteúdo no session_state
     if st.session_state["logs_banco"]:
@@ -578,7 +592,8 @@ with tab_val:
                 st.session_state["manutencao_resultado_validacao"] = res_val
                 st.toast("Validação concluída com sucesso!", icon="✅")
             except Exception as e:
-                st.error(f"Erro ao executar teste de validação: {e}")
+                logger.error(f"Erro ao executar teste de validação: {e}", exc_info=True)
+                st.error("Ocorreu um erro durante o teste retrospectivo com o Google Earth Engine.")
 
     if "manutencao_resultado_validacao" in st.session_state:
         val = st.session_state["manutencao_resultado_validacao"]

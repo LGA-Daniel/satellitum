@@ -8,19 +8,35 @@ import pandas as pd
 import streamlit as st
 from modules.db import obter_df_pixels_por_imagem_ids_generator
 
-module_dir = os.path.dirname(os.path.abspath(__file__))
-project_root = os.path.dirname(module_dir)
-temp_dir = os.path.join(project_root, "temp_downloads")
+import tempfile
+import uuid
 
-def limpar_arquivos_exportacao_disco():
-    """Remove todos os arquivos gerados de exportação no disco e aciona garbage collection."""
-    if os.path.exists(temp_dir):
+def obter_pasta_exportacao_sessao() -> str:
+    """Garante diretório temporário isolado por sessão para evitar condições de corrida entre usuários concorrentes."""
+    sess_export_dir = st.session_state.get("session_export_dir")
+    if not sess_export_dir or not os.path.exists(sess_export_dir):
+        sess_token = str(uuid.uuid4())[:8]
+        sess_export_dir = os.path.join(tempfile.gettempdir(), "satellitum_exports", sess_token)
+        os.makedirs(sess_export_dir, exist_ok=True)
+        st.session_state["session_export_dir"] = sess_export_dir
+    return sess_export_dir
+
+def limpar_arquivos_exportacao_disco(max_age_seconds: int = 7200):
+    """Remove arquivos de exportação com mais de 2 horas em /tmp para manter o contêiner enxuto sem interferir em downloads ativos."""
+    base_dir = os.path.join(tempfile.gettempdir(), "satellitum_exports")
+    if os.path.exists(base_dir):
+        now = time.time()
         try:
-            for filename in os.listdir(temp_dir):
-                if filename.startswith("CELMM_Export_"):
-                    fpath = os.path.join(temp_dir, filename)
-                    if os.path.isfile(fpath):
-                        os.remove(fpath)
+            for root, dirs, files in os.walk(base_dir):
+                for filename in files:
+                    if filename.startswith("CELMM_Export_"):
+                        fpath = os.path.join(root, filename)
+                        if os.path.isfile(fpath):
+                            if (now - os.path.getmtime(fpath)) > max_age_seconds:
+                                try:
+                                    os.remove(fpath)
+                                except Exception:
+                                    pass
         except Exception:
             pass
     gc.collect()
@@ -31,7 +47,7 @@ def preparar_arquivo_exportacao(ids_imagens: list, tipo_formato: str) -> dict:
     Evita sobrecarga de memória RAM mesmo para exportações massivas de centenas de megabytes (800MB+).
     Retorna dicionário contendo caminho do arquivo em disco, nome, mime_type, tamanho em MB, total de linhas e tempo.
     """
-    os.makedirs(temp_dir, exist_ok=True)
+    temp_dir = obter_pasta_exportacao_sessao()
     
     ids_hash = hashlib.md5(str(sorted(ids_imagens)).encode()).hexdigest()
     file_ext = "csv" if tipo_formato == 'csv' else "xlsx"
@@ -42,7 +58,7 @@ def preparar_arquivo_exportacao(ids_imagens: list, tipo_formato: str) -> dict:
     if export_key in st.session_state and os.path.exists(target_filepath):
         return st.session_state[export_key]
 
-    # Remove arquivos de exportação anteriores para manter o disco limpo
+    # Remove arquivos de exportação antigos expirados
     limpar_arquivos_exportacao_disco()
 
     start_time = time.time()

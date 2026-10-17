@@ -2,6 +2,9 @@ import streamlit as st
 import pandas as pd
 import datetime
 import inspect
+import logging
+
+logger = logging.getLogger(__name__)
 from modules.db import (
     criar_tarefa_background, 
     obter_df_pixels_por_imagem_ids,
@@ -249,7 +252,8 @@ def _acoes_produtos_dialog_impl(selected_rows, valid_drive_selected, valid_db_se
                                 limpar_arquivos_exportacao_disco()
                                 st.rerun()
                     except Exception as e:
-                        st.error(f"Erro: {e}")
+                        logger.error(f"Erro ao preparar arquivo de exportação: {e}", exc_info=True)
+                        st.error("Não foi possível gerar a exportação dos produtos selecionados.")
             else:
                 col_btn_csv, col_btn_xlsx = st.columns(2)
                 with col_btn_csv:

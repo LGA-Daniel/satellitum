@@ -5,6 +5,9 @@ from typing import List, Dict, Any, Optional, Tuple
 import ee
 import streamlit as st
 
+import logging
+logger = logging.getLogger(__name__)
+
 @st.cache_resource
 def init_gee():
     """Inicializa a conexão com o Google Earth Engine apenas uma vez por sessão."""
@@ -15,8 +18,9 @@ def init_gee():
         ee.Initialize(credentials=creds, project=project)
         return True
     except Exception as e:
+        logger.error(f"Erro ao inicializar o Earth Engine: {e}", exc_info=True)
         try:
-            st.error(f"Erro ao inicializar o Earth Engine: {e}. Verifique as credenciais.")
+            st.error("Falha ao inicializar o Google Earth Engine. Verifique as credenciais na aba de Administração.")
         except Exception:
             pass
         return False

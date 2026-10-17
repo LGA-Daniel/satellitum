@@ -19,6 +19,11 @@ from modules.download_arquivos import baixar_arquivos_dialog
 # Configuração da página
 st.set_page_config(page_title="CELMM | Gerenciamento de Produtos Orbitais", page_icon="🛰️", layout="wide")
 
+current_user = st.session_state.get("user")
+if not current_user:
+    st.error("⛔ Acesso não autorizado. Faça login para acessar esta página.")
+    st.stop()
+
 # Controle de estado e reset de filtros
 if 'reset_counter' not in st.session_state:
     st.session_state['reset_counter'] = 0

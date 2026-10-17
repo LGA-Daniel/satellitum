@@ -20,7 +20,9 @@ TIPO_MAP = {
 
 def card_destacado(label: str, value: str, title_tooltip: str = None) -> str:
     """Retorna o HTML formatado de um card de métrica padrão do sistema."""
-    tooltip_attr = f'title="{title_tooltip}"' if title_tooltip else ""
+    s_label = html.escape(str(label))
+    s_value = html.escape(str(value))
+    tooltip_attr = f'title="{html.escape(str(title_tooltip))}"' if title_tooltip else ""
     return f"""
         <div style="
             background-color: rgba(2, 132, 199, 0.08); 
@@ -36,8 +38,8 @@ def card_destacado(label: str, value: str, title_tooltip: str = None) -> str:
             margin-bottom: 12px;
             width: 100%;
         " {tooltip_attr}>
-            <p style="margin: 0; font-size: 0.85em; font-weight: 500; color: var(--text-color); opacity: 0.8; text-align: center; width: 100%;">{label}</p>
-            <div style="margin: 4px 0 0 0; font-size: 1.3em; color: var(--primary-color); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; width: 100%;">{value}</div>
+            <p style="margin: 0; font-size: 0.85em; font-weight: 500; color: var(--text-color); opacity: 0.8; text-align: center; width: 100%;">{s_label}</p>
+            <div style="margin: 4px 0 0 0; font-size: 1.3em; color: var(--primary-color); font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; width: 100%;">{s_value}</div>
         </div>
     """
 

@@ -4,17 +4,32 @@ import os
 import shutil
 import zipfile
 import inspect
+import uuid
+import tempfile
+import logging
 from modules.api_gdrive import baixar_arquivo_drive_para_disco
 
-temp_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "temp_downloads")
+logger = logging.getLogger(__name__)
+
+def obter_pasta_temporaria_sessao() -> str:
+    """Retorna diretório temporário exclusivo e isolado para a sessão ativa em /tmp."""
+    sess_dir = st.session_state.get("session_download_dir")
+    if not sess_dir or not os.path.exists(sess_dir):
+        sess_id = str(uuid.uuid4())[:8]
+        sess_dir = os.path.join(tempfile.gettempdir(), "satellitum_downloads", sess_id)
+        os.makedirs(sess_dir, exist_ok=True)
+        st.session_state["session_download_dir"] = sess_dir
+    return sess_dir
 
 def limpar_pasta_temporaria():
-    if os.path.exists(temp_dir):
+    """Limpa exclusivamente o diretório temporário da sessão ativa do usuário."""
+    sess_dir = st.session_state.get("session_download_dir")
+    if sess_dir and os.path.exists(sess_dir):
         try:
-            shutil.rmtree(temp_dir)
+            shutil.rmtree(sess_dir)
         except Exception:
             pass
-    os.makedirs(temp_dir, exist_ok=True)
+        st.session_state["session_download_dir"] = None
 
 def on_dismiss_download_callback():
     st.session_state['show_download_modal'] = False
@@ -25,15 +40,27 @@ def _baixar_arquivos_dialog_impl(valid_selected, map_nome_id, map_nome_id_lower)
     
     with st.spinner("Baixando arquivos do Drive diretamente para o servidor..."):
         try:
-            limpar_pasta_temporaria()
+            temp_dir = obter_pasta_temporaria_sessao()
+            # Limpa arquivos prévios da mesma sessão
+            for fname in os.listdir(temp_dir):
+                fpath = os.path.join(temp_dir, fname)
+                if os.path.isfile(fpath):
+                    try:
+                        os.remove(fpath)
+                    except Exception:
+                        pass
+                        
             files_downloaded = []
             
             for idx, row in valid_selected.iterrows():
                 date_str = row["Data do Produto"].strftime('%Y-%m-%d') if isinstance(row["Data do Produto"], (datetime.date, datetime.datetime)) else str(row["Data do Produto"])
-                nome_esperado = f"CELMM_Data_{date_str}_{int(row['Tamanho Pixel (m)'])}m.csv"
+                raw_filename = f"CELMM_Data_{date_str}_{int(row['Tamanho Pixel (m)'])}m.csv"
+                nome_esperado = os.path.basename(raw_filename)
                 fid = map_nome_id.get(nome_esperado) or map_nome_id_lower.get(nome_esperado.lower())
                 if fid:
-                    dest_path = os.path.join(temp_dir, nome_esperado)
+                    dest_path = os.path.abspath(os.path.join(temp_dir, nome_esperado))
+                    if not dest_path.startswith(os.path.abspath(temp_dir)):
+                        continue
                     baixar_arquivo_drive_para_disco(fid, dest_path)
                     files_downloaded.append(dest_path)
             
@@ -70,7 +97,8 @@ def _baixar_arquivos_dialog_impl(valid_selected, map_nome_id, map_nome_id_lower)
                         use_container_width=True
                     )
         except Exception as e:
-            st.error(f"Erro ao processar arquivos do Drive: {e}")
+            logger.error(f"Erro ao processar arquivos do Drive: {e}", exc_info=True)
+            st.error("Ocorreu uma falha ao baixar os arquivos do Google Drive. Tente novamente.")
 
 def baixar_arquivos_dialog(valid_selected, map_nome_id, map_nome_id_lower):
     sig_dialog = inspect.signature(st.dialog)

@@ -32,7 +32,7 @@ def dialog_novo_usuario():
     with col2:
         name = st.text_input("Nome Completo", placeholder="ex: João Silva")
     with col3:
-        password = st.text_input("Senha Inicial *", type="password", placeholder="Mínimo 4 caracteres")
+        password = st.text_input("Senha Inicial *", type="password", placeholder="Mínimo 8 caracteres")
 
     st.markdown("---")
     st.markdown("### 🔐 Permissões de Acesso por Tela")
@@ -164,8 +164,8 @@ def dialog_resetar_senha(username: str):
     confirm_pass = st.text_input("Confirme a Nova Senha", type="password", key="reset_pass_confirm")
     
     if st.button("Confirmar Redefinição", type="primary", use_container_width=True):
-        if not new_pass or len(new_pass) < 4:
-            st.error("A senha deve conter no mínimo 4 caracteres.")
+        if not new_pass or len(new_pass) < 8:
+            st.error("A senha deve conter no mínimo 8 caracteres.")
             return
         if new_pass != confirm_pass:
             st.error("As senhas informadas não conferem.")

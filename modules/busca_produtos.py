@@ -3,7 +3,10 @@ import pandas as pd
 import datetime
 import time
 import html
+import logging
 import ee
+
+logger = logging.getLogger(__name__)
 import inspect
 from modules.api_gee import init_gee
 from modules.db import salvar_metadados, verificar_metadados_existentes
@@ -46,11 +49,12 @@ def _buscar_produtos_dialog_impl():
                 else:
                     datas_str = ", ".join(conflitos)
 
+                safe_datas_str = html.escape(datas_str)
                 st.markdown(f"""
                     <div style="margin-bottom: 12px;">
                         <h4 style="margin: 0 0 6px 0; font-size: 1.1em; font-weight: 600; color: #f59e0b;">⚠️ Conflito de Metadados Existentes</h4>
                         <p style="margin: 0 0 8px 0; font-size: 0.88em; line-height: 1.4;">
-                            Foram identificados <strong>{len(conflitos)}</strong> registro(s) que já existem no Banco de Dados para as datas: <code>{datas_str}</code>.
+                            Foram identificados <strong>{len(conflitos)}</strong> registro(s) que já existem no Banco de Dados para as datas: <code>{safe_datas_str}</code>.
                         </p>
                         <p style="margin: 0; font-size: 0.85em; opacity: 0.8;">
                             Total consultado: <strong>{total_encontrados}</strong> produto(s) | Novos a inserir: <strong>{total_novos}</strong> produto(s).
@@ -344,7 +348,8 @@ def _buscar_produtos_dialog_impl():
                 st.session_state['busca_modal_dados'] = dados_tabela
                 st.session_state['busca_modal_pixel_salvo'] = pixel_size
         except Exception as e:
-            st.error(f"Erro durante o processamento: {e}")
+            logger.error(f"Erro durante o processamento de busca GEE: {e}", exc_info=True)
+            st.error("Ocorreu um erro durante a consulta e processamento no Earth Engine. Consulte os logs técnicos.")
 
     if st.session_state['busca_modal_dados'] is not None:
         salvo_sucesso = False
